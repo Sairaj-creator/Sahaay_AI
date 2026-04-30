@@ -1,5 +1,6 @@
 import express from 'express'
 import cors from 'cors'
+import rateLimit from 'express-rate-limit'
 import { db } from './db.js'
 
 const app = express()
@@ -16,12 +17,25 @@ function parseUserId(value, fallback = 1) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null
 }
 
-app.post('/api/log-query', (req, res) => {
+const writeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please slow down.' },
+})
+
+app.post('/api/log-query', writeLimiter, (req, res) => {
   const userId = parseUserId(req.body.user_id, 1)
   const { mode, query_text = '', response_text = '' } = req.body
 
   if (!userId) return badRequest(res, 'A valid user_id is required.')
   if (!mode || typeof mode !== 'string') return badRequest(res, 'A valid mode is required.')
+  if (mode.length > 32) return badRequest(res, 'Mode must be 32 characters or fewer.')
+  if (typeof query_text !== 'string') return badRequest(res, 'query_text must be a string.')
+  if (query_text.length > 2000) return badRequest(res, 'query_text must be 2000 characters or fewer.')
+  if (typeof response_text !== 'string') return badRequest(res, 'response_text must be a string.')
+  if (response_text.length > 4000) return badRequest(res, 'response_text must be 4000 characters or fewer.')
 
   const result = db
     .prepare('INSERT INTO query_log (user_id, mode, query_text, response_text) VALUES (?, ?, ?, ?)')
@@ -59,14 +73,31 @@ app.get('/api/dashboard/:userId', (req, res) => {
   })
 })
 
-app.post('/api/register-face', (req, res) => {
+app.get('/api/emergency/:userId', (req, res) => {
+  const userId = parseUserId(req.params.userId)
+  if (!userId) return badRequest(res, 'A valid userId is required.')
+
+  const contacts = db
+    .prepare('SELECT * FROM emergency_contacts WHERE user_id = ? ORDER BY id DESC')
+    .all(userId)
+
+  return res.json(contacts)
+})
+
+app.post('/api/register-face', writeLimiter, (req, res) => {
   const userId = parseUserId(req.body.user_id)
   const { contact_name, embedding = [], photo_url = '' } = req.body
 
   if (!userId) return badRequest(res, 'A valid user_id is required.')
   if (!contact_name || typeof contact_name !== 'string') return badRequest(res, 'A contact_name is required.')
   if (!Array.isArray(embedding)) return badRequest(res, 'Embedding must be an array.')
+  if (embedding.length > 0 && embedding.length !== 128)
+    return badRequest(res, 'Embedding must be empty or exactly 128 floats.')
   if (!photo_url || typeof photo_url !== 'string') return badRequest(res, 'A photo_url is required.')
+  if (contact_name.trim().length > 80)
+    return badRequest(res, 'contact_name must be 80 characters or fewer.')
+  if (photo_url.length > 2000000)
+    return badRequest(res, 'photo_url must be 2000000 characters or fewer.')
 
   const result = db
     .prepare('INSERT INTO registered_faces (user_id, contact_name, embedding, photo_url) VALUES (?, ?, ?, ?)')
@@ -83,13 +114,37 @@ app.get('/api/faces/:userId', (req, res) => {
   return res.json(faces.map((face) => ({ ...face, embedding: JSON.parse(face.embedding || '[]') })))
 })
 
-app.post('/api/emergency', (req, res) => {
+app.delete('/api/faces/:id', (req, res) => {
+  const id = Number(req.params.id)
+  if (!Number.isInteger(id) || id <= 0) return badRequest(res, 'A valid face id is required.')
+
+  db.prepare('DELETE FROM registered_faces WHERE id = ?').run(id)
+
+  return res.json({ deleted: true, id })
+})
+
+app.get('/api/query-log/:userId', (req, res) => {
+  const userId = parseUserId(req.params.userId)
+  if (!userId) return badRequest(res, 'A valid userId is required.')
+
+  const entries = db
+    .prepare(
+      'SELECT id, mode, query_text, response_text, timestamp FROM query_log WHERE user_id = ? ORDER BY timestamp DESC LIMIT 50'
+    )
+    .all(userId)
+
+  return res.json(entries)
+})
+
+app.post('/api/emergency', writeLimiter, (req, res) => {
   const userId = parseUserId(req.body.user_id)
   const { name, phone } = req.body
 
   if (!userId) return badRequest(res, 'A valid user_id is required.')
   if (!name || typeof name !== 'string') return badRequest(res, 'A contact name is required.')
   if (!phone || typeof phone !== 'string') return badRequest(res, 'A phone number is required.')
+  if (name.trim().length > 80) return badRequest(res, 'name must be 80 characters or fewer.')
+  if (phone.trim().length > 20) return badRequest(res, 'phone must be 20 characters or fewer.')
 
   const result = db
     .prepare('INSERT INTO emergency_contacts (user_id, name, phone) VALUES (?, ?, ?)')
@@ -109,4 +164,8 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3001
 
-app.listen(PORT, () => console.log(`Sahaay API running on port ${PORT}`))
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => console.log(`Sahaay API running on port ${PORT}`))
+}
+
+export { app }

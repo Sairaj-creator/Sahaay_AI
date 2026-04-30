@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { loadFaceModels, descriptorFromBase64 } from '../utils/faceMatch.js'
 import { announceScreen } from '../utils/tts.js'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || ''
@@ -20,13 +21,18 @@ function readFileAsDataUrl(file) {
 export default function CaregiverScreen() {
   const [dashboard, setDashboard] = useState({ queries_today: 0, top_mode: 'scene', last_active: null, contacts: [] })
   const [faces, setFaces] = useState([])
+  const [recentActivity, setRecentActivity] = useState([])
   const [statusMessage, setStatusMessage] = useState('')
   const [loading, setLoading] = useState(true)
   const [faceForm, setFaceForm] = useState({ contact_name: '', photo_url: '', file_name: '' })
   const [emergencyForm, setEmergencyForm] = useState({ name: '', phone: '' })
 
   const loadDashboard = async () => {
-    const [dashboardRes, facesRes] = await Promise.all([fetch(apiUrl('/api/dashboard/1')), fetch(apiUrl('/api/faces/1'))])
+    const [dashboardRes, facesRes, activityRes] = await Promise.all([
+      fetch(apiUrl('/api/dashboard/1')),
+      fetch(apiUrl('/api/faces/1')),
+      fetch(apiUrl('/api/query-log/1')),
+    ])
 
     if (dashboardRes.ok) {
       setDashboard(await dashboardRes.json())
@@ -34,6 +40,11 @@ export default function CaregiverScreen() {
 
     if (facesRes.ok) {
       setFaces(await facesRes.json())
+    }
+
+    if (activityRes.ok) {
+      const entries = await activityRes.json()
+      setRecentActivity(Array.isArray(entries) ? entries.slice(0, 10) : [])
     }
   }
 
@@ -77,13 +88,30 @@ export default function CaregiverScreen() {
     }
 
     try {
+      let embedding = []
+
+      try {
+        const modelsReady = await loadFaceModels()
+        if (modelsReady) {
+          const descriptor = await descriptorFromBase64(faceForm.photo_url.split(',')[1])
+          if (descriptor) {
+            embedding = descriptor
+          } else {
+            setStatusMessage('No face detected in the uploaded photo. Please use a clear front-facing photo.')
+            return
+          }
+        }
+      } catch (err) {
+        console.warn('Descriptor extraction failed, storing without embedding:', err.message)
+      }
+
       const res = await fetch(apiUrl('/api/register-face'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: 1,
           contact_name: faceForm.contact_name.trim(),
-          embedding: [],
+          embedding,
           photo_url: faceForm.photo_url,
         }),
       })
@@ -130,6 +158,29 @@ export default function CaregiverScreen() {
     } catch (err) {
       setStatusMessage(err.message)
     }
+  }
+
+  const deleteFace = async (faceId) => {
+    try {
+      const res = await fetch(apiUrl(`/api/faces/${faceId}`), {
+        method: 'DELETE',
+      })
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}))
+        throw new Error(payload.error || 'Could not delete face.')
+      }
+
+      setStatusMessage('Face deleted successfully.')
+      await loadDashboard()
+    } catch (err) {
+      setStatusMessage(err.message)
+    }
+  }
+
+  const truncateQuery = (text) => {
+    if (!text) return 'No spoken query saved'
+    return text.length > 60 ? `${text.slice(0, 57)}...` : text
   }
 
   return (
@@ -342,9 +393,62 @@ export default function CaregiverScreen() {
                       style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 14, marginBottom: 12 }}
                     />
                   ) : null}
-                  <p style={{ fontSize: 18, margin: 0 }}>{face.contact_name}</p>
+                  <p style={{ fontSize: 18, margin: '0 0 12px' }}>{face.contact_name}</p>
+                  <button
+                    type="button"
+                    onClick={() => deleteFace(face.id)}
+                    aria-label={`Delete ${face.contact_name}`}
+                    style={{
+                      minWidth: 120,
+                      minHeight: 56,
+                      borderRadius: 16,
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      background: 'rgba(218, 71, 71, 0.16)',
+                      color: '#ffdede',
+                      fontSize: 18,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Delete
+                  </button>
                 </div>
               ))}
+            </div>
+          )}
+        </section>
+
+        <section
+          style={{
+            borderRadius: 24,
+            padding: 24,
+            background: 'rgba(255,255,255,0.05)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            marginTop: 20,
+          }}
+        >
+          <h2 style={{ fontSize: 26, marginTop: 0 }}>Recent activity</h2>
+          {recentActivity.length === 0 ? (
+            <p style={{ fontSize: 18, color: '#c7d7e8' }}>No recent activity recorded yet.</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 18 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: '#8cc8ff' }}>
+                    <th style={{ padding: '0 0 14px' }}>Timestamp</th>
+                    <th style={{ padding: '0 0 14px' }}>Mode</th>
+                    <th style={{ padding: '0 0 14px' }}>Query</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentActivity.map((entry) => (
+                    <tr key={entry.id} style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                      <td style={{ padding: '14px 0', color: '#f8fbff' }}>{entry.timestamp || 'Unknown time'}</td>
+                      <td style={{ padding: '14px 0', color: '#c7d7e8', textTransform: 'capitalize' }}>{entry.mode}</td>
+                      <td style={{ padding: '14px 0', color: '#c7d7e8' }}>{truncateQuery(entry.query_text)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </section>

@@ -5,3 +5,13 @@ dist/
 .DS_Store
 *.log
 sahaay.db
+
+# Tool-specific files
+.agents/
+.cursor/
+.jetro/
+.mcp.json
+.mcp.json.backup
+.windsurfrules
+AGENT.md
+CLAUDE.md

@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { compressFrame, callVision } from '../utils/openai.js'
 import { classifyCurrency } from '../utils/currency.js'
+import { loadFaceModels, descriptorFromBase64, descriptorFromVideo, matchFace } from '../utils/faceMatch.js'
 import { PROMPTS } from '../utils/prompts.js'
 
 let ocrWorkerPromise = null
@@ -158,16 +159,40 @@ export function useVision() {
           throw new Error('Offline mode is on. Scene and face descriptions need internet access.')
         }
 
-        const base64 = compressFrame(videoRef.current)
-
-        let prompt = PROMPTS[mode] || PROMPTS.scene
         if (mode === 'face') {
+          const faceModelsReady = await loadFaceModels()
+
+          if (faceModelsReady && contacts.length > 0) {
+            const localMatch = await matchFace(videoRef.current, contacts)
+
+            if (localMatch) {
+              return `This appears to be ${localMatch.name}.`
+            }
+
+            const base64 = compressFrame(videoRef.current)
+            const liveDescriptor = await descriptorFromVideo(videoRef.current)
+
+            if (!liveDescriptor) {
+              return 'No face detected in frame. Please point the camera directly at the person.'
+            }
+
+            const contactList = contacts.map((contact) => contact.contact_name).join(', ')
+            const prompt = PROMPTS.face.replace('{CONTACTS_PLACEHOLDER}', contactList)
+            return await callVision(base64, prompt)
+          }
+
+          const base64 = compressFrame(videoRef.current)
           const contactList =
             contacts.length > 0
               ? contacts.map((contact) => contact.contact_name).join(', ')
               : 'No registered contacts.'
-          prompt = prompt.replace('{CONTACTS_PLACEHOLDER}', contactList)
+          const prompt = PROMPTS.face.replace('{CONTACTS_PLACEHOLDER}', contactList)
+          return await callVision(base64, prompt)
         }
+
+        const base64 = compressFrame(videoRef.current)
+
+        const prompt = PROMPTS[mode] || PROMPTS.scene
 
         return await callVision(base64, prompt)
       } catch (err) {

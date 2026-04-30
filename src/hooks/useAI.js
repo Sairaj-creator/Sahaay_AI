@@ -12,6 +12,11 @@ const STORAGE_KEYS = {
   lang: 'sahaay-lang',
 }
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || ''
+const LANGUAGE_ANNOUNCEMENTS = {
+  'en-IN': { text: 'Language switched to English.', lang: 'en-IN' },
+  'hi-IN': { text: 'भाषा हिंदी में बदल दी गई।', lang: 'hi-IN' },
+  'kn-IN': { text: 'ಭಾಷೆಯನ್ನು ಕನ್ನಡಕ್ಕೆ ಬದಲಾಯಿಸಲಾಗಿದೆ.', lang: 'kn-IN' },
+}
 
 function getStoredChoice(key, fallback, validValues) {
   if (typeof window === 'undefined') return fallback
@@ -120,6 +125,10 @@ export function useAI() {
     if (!VALID_LANGS.includes(newLang)) return
     setLang(newLang)
     setStoredChoice(STORAGE_KEYS.lang, newLang)
+    const announcement = LANGUAGE_ANNOUNCEMENTS[newLang]
+    if (announcement) {
+      speak(announcement.text, announcement.lang)
+    }
   }, [])
 
   return {
