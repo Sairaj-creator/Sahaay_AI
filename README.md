@@ -7,7 +7,7 @@ Voice-first, camera-powered AI companion for visually impaired users in India.
 - React 18 + Vite
 - Tailwind CSS v4
 - Web Speech API for STT/TTS
-- Gemini 2.0 Flash Lite with Groq LLaVA fallback
+- Gemini 2.0 Flash Lite with Groq vision fallback
 - Tesseract.js OCR
 - TensorFlow.js + Teachable Machine for offline currency detection
 - Express + SQLite backend scaffold
@@ -23,7 +23,6 @@ Voice-first, camera-powered AI companion for visually impaired users in India.
 
 - Use Chrome or Edge for speech recognition.
 - This repo includes `.npmrc` with `legacy-peer-deps=true` because `@teachablemachine/image` still declares an outdated TensorFlow peer range.
+- Set `VITE_API_BASE_URL` to your hosted backend URL in production. During local development, Vite proxies `/api/*` to `http://localhost:3001`.
 - Place trained Teachable Machine exports in `public/currency-model/`.
 - The `src/hooks/useAI.js` contract is the shared integration surface for the team.
-
-# Bengaluru_Hackathon

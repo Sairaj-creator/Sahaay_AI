@@ -1,6 +1,49 @@
 import { useState, useRef, useCallback } from 'react'
+import { callWhisper } from '../utils/openai.js'
 
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+function getSpeechRecognitionCtor() {
+  if (typeof window === 'undefined') return null
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null
+}
+
+async function captureAudioBlob(durationMs = 3500) {
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    throw new Error('Speech recognition is not supported. Use Chrome or Edge.')
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    const recorder = new MediaRecorder(stream)
+    const cleanup = () => stream.getTracks().forEach((track) => track.stop())
+    const timeoutId = setTimeout(() => {
+      if (recorder.state !== 'inactive') {
+        recorder.stop()
+      }
+    }, durationMs)
+
+    recorder.ondataavailable = (event) => {
+      if (event.data?.size) {
+        chunks.push(event.data)
+      }
+    }
+
+    recorder.onerror = () => {
+      clearTimeout(timeoutId)
+      cleanup()
+      reject(new Error('Could not record audio.'))
+    }
+
+    recorder.onstop = () => {
+      clearTimeout(timeoutId)
+      cleanup()
+      resolve(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }))
+    }
+
+    recorder.start()
+  })
+}
 
 export function useMic() {
   const [isRecording, setIsRecording] = useState(false)
@@ -10,12 +53,36 @@ export function useMic() {
   const recognitionRef = useRef(null)
   const resolveRef = useRef(null)
 
-  const supported = !!SpeechRecognition
+  const supported = !!getSpeechRecognitionCtor()
 
   const startRecording = useCallback((lang = 'en-IN') => {
     return new Promise((resolve, reject) => {
+      const SpeechRecognition = getSpeechRecognitionCtor()
+
       if (!SpeechRecognition) {
-        reject(new Error('Speech recognition not supported. Use Chrome or Edge.'))
+        ;(async () => {
+          try {
+            setError(null)
+            setIsRecording(true)
+            setIsTranscribing(false)
+
+            const audioBlob = await captureAudioBlob()
+
+            setIsRecording(false)
+            setIsTranscribing(true)
+
+            const text = (await callWhisper(audioBlob, lang)).trim()
+            setTranscript(text)
+            setIsTranscribing(false)
+            resolve(text)
+          } catch (err) {
+            setIsRecording(false)
+            setIsTranscribing(false)
+            const message = err.message || 'Speech recognition is not supported. Use Chrome or Edge.'
+            setError(message)
+            reject(new Error(message))
+          }
+        })()
         return
       }
 
@@ -39,6 +106,7 @@ export function useMic() {
         setTranscript(text)
         setIsRecording(false)
         setIsTranscribing(false)
+        resolveRef.current = null
         resolve(text)
       }
 
@@ -47,6 +115,7 @@ export function useMic() {
         setIsTranscribing(false)
 
         if (event.error === 'aborted') {
+          resolveRef.current = null
           resolve('')
           return
         }
@@ -68,6 +137,7 @@ export function useMic() {
         setIsTranscribing(false)
 
         if (resolveRef.current === resolve) {
+          resolveRef.current = null
           resolve('')
         }
       }

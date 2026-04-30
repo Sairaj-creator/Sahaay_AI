@@ -6,6 +6,7 @@ const GEMINI_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent'
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
 const WHISPER_URL = 'https://api.openai.com/v1/audio/transcriptions'
+const GROQ_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
 
 async function fetchWithRetry(fn, maxRetries = 2) {
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -30,7 +31,19 @@ export function compressFrame(videoElement, size = 512) {
   canvas.width = size
   canvas.height = size
   const ctx = canvas.getContext('2d')
-  ctx.drawImage(videoElement, 0, 0, size, size)
+
+  const sourceWidth = videoElement.videoWidth || size
+  const sourceHeight = videoElement.videoHeight || size
+  const scale = Math.min(size / sourceWidth, size / sourceHeight)
+  const drawWidth = sourceWidth * scale
+  const drawHeight = sourceHeight * scale
+  const offsetX = (size - drawWidth) / 2
+  const offsetY = (size - drawHeight) / 2
+
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(0, 0, size, size)
+  ctx.drawImage(videoElement, offsetX, offsetY, drawWidth, drawHeight)
+
   return canvas.toDataURL('image/jpeg', 0.8).split(',')[1]
 }
 
@@ -71,7 +84,7 @@ export async function callGroqVision(base64Image, prompt) {
       Authorization: `Bearer ${GROQ_KEY}`,
     },
     body: JSON.stringify({
-      model: 'llava-v1.5-7b-4096-preview',
+      model: GROQ_VISION_MODEL,
       messages: [
         {
           role: 'user',
@@ -81,7 +94,7 @@ export async function callGroqVision(base64Image, prompt) {
           ],
         },
       ],
-      max_tokens: 200,
+      max_completion_tokens: 200,
     }),
   })
 

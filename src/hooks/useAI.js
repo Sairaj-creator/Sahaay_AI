@@ -7,13 +7,33 @@ import { checkDemoScript } from '../utils/prompts.js'
 const VALID_MODES = ['scene', 'ocr', 'currency', 'face']
 const VALID_LANGS = ['en-IN', 'hi-IN', 'kn-IN']
 const SAFETY_TIMEOUT_MS = 10000
+const STORAGE_KEYS = {
+  mode: 'sahaay-mode',
+  lang: 'sahaay-lang',
+}
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || ''
+
+function getStoredChoice(key, fallback, validValues) {
+  if (typeof window === 'undefined') return fallback
+  const value = window.localStorage.getItem(key)
+  return validValues.includes(value) ? value : fallback
+}
+
+function setStoredChoice(key, value) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(key, value)
+}
+
+function apiUrl(path) {
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path
+}
 
 export function useAI() {
   const [status, setStatus] = useState('idle')
   const [response, setResponse] = useState(null)
   const [error, setError] = useState(null)
-  const [mode, setMode] = useState('scene')
-  const [lang, setLang] = useState('en-IN')
+  const [mode, setMode] = useState(() => getStoredChoice(STORAGE_KEYS.mode, 'scene', VALID_MODES))
+  const [lang, setLang] = useState(() => getStoredChoice(STORAGE_KEYS.lang, 'en-IN', VALID_LANGS))
 
   const mic = useMic()
   const vision = useVision()
@@ -33,6 +53,7 @@ export function useAI() {
     isActiveRef.current = true
     clearSafetyTimeout()
     setError(null)
+    setResponse(null)
 
     timeoutRef.current = setTimeout(() => {
       setStatus('idle')
@@ -62,7 +83,8 @@ export function useAI() {
       }
 
       setStatus('thinking')
-      const result = await vision.analyzeFrame(mode)
+      const contacts = mode === 'face' ? await fetchRegisteredFaces() : []
+      const result = await vision.analyzeFrame(mode, contacts, lang)
 
       clearSafetyTimeout()
       setStatus('speaking')
@@ -88,6 +110,7 @@ export function useAI() {
     (newMode) => {
       if (!VALID_MODES.includes(newMode)) return
       setMode(newMode)
+      setStoredChoice(STORAGE_KEYS.mode, newMode)
       speak(`Mode switched to ${newMode}`, lang)
     },
     [lang]
@@ -96,6 +119,7 @@ export function useAI() {
   const switchLanguage = useCallback((newLang) => {
     if (!VALID_LANGS.includes(newLang)) return
     setLang(newLang)
+    setStoredChoice(STORAGE_KEYS.lang, newLang)
   }, [])
 
   return {
@@ -121,7 +145,7 @@ export function useAI() {
 
 async function logQuery({ transcript, response, mode }) {
   try {
-    await fetch('/api/log-query', {
+    await fetch(apiUrl('/api/log-query'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -132,6 +156,17 @@ async function logQuery({ transcript, response, mode }) {
       }),
     })
   } catch {
-    // Backend offline — silently ignore
+    // Backend offline - silently ignore
+  }
+}
+
+async function fetchRegisteredFaces() {
+  try {
+    const res = await fetch(apiUrl('/api/faces/1'))
+    if (!res.ok) return []
+    const data = await res.json()
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
   }
 }

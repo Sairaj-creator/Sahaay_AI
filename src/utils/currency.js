@@ -7,6 +7,15 @@ export async function loadCurrencyModel() {
 
   try {
     isLoading = true
+
+    const response = await fetch('/currency-model/model.json')
+    const manifest = await response.json()
+
+    if (manifest?.placeholder) {
+      console.warn('Currency model placeholder detected. Falling back to Gemini vision.')
+      return null
+    }
+
     const tmImage = await import('@teachablemachine/image')
     model = await tmImage.load('/currency-model/model.json', '/currency-model/metadata.json')
     console.log('Currency model loaded successfully')
