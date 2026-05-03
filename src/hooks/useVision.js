@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { compressFrame, callVision } from '../utils/openai.js'
 import { classifyCurrency } from '../utils/currency.js'
-import { loadFaceModels, descriptorFromBase64, descriptorFromVideo, matchFace } from '../utils/faceMatch.js'
+import { loadFaceModels, descriptorFromVideo, matchFace } from '../utils/faceMatch.js'
 import { PROMPTS } from '../utils/prompts.js'
 
 let ocrWorkerPromise = null
@@ -105,8 +105,20 @@ export function useVision() {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        await videoRef.current.play()
-        setCameraReady(true)
+        videoRef.current.onloadedmetadata = async () => {
+          // Guard: only play if this stream is still the active one
+          if (videoRef.current && videoRef.current.srcObject === stream) {
+            try {
+              await videoRef.current.play()
+              setCameraReady(true)
+            } catch (playErr) {
+              // Ignore AbortError from rapid mount/unmount cycles
+              if (playErr.name !== 'AbortError') {
+                console.error('Camera play error:', playErr)
+              }
+            }
+          }
+        }
       }
     } catch (err) {
       setError('Camera access denied. Please allow camera permission.')

@@ -49,7 +49,7 @@ describe('utils/currency', () => {
     InferenceSession.create.mockResolvedValue({})
     const { loadCurrencyModel } = await import('../utils/currency.js')
     await loadCurrencyModel()
-    expect(InferenceSession.create).toHaveBeenCalledWith('/currency.onnx', {
+    expect(InferenceSession.create).toHaveBeenCalledWith('/currency-model/best.onnx', {
       executionProviders: ['wasm'],
       graphOptimizationLevel: 'all',
     })

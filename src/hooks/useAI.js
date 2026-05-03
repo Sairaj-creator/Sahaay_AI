@@ -1,12 +1,13 @@
 import { useState, useCallback, useRef } from 'react'
 import { useMic } from './useMic.js'
 import { useVision } from './useVision.js'
-import { speak } from '../utils/tts.js'
+import { speak, stopSpeaking } from '../utils/tts.js'
 import { checkDemoScript } from '../utils/prompts.js'
+import { loadLocalFaces } from '../utils/faceMatch.js'
 
 const VALID_MODES = ['scene', 'ocr', 'currency', 'face']
 const VALID_LANGS = ['en-IN', 'hi-IN', 'kn-IN']
-const SAFETY_TIMEOUT_MS = 10000
+const SAFETY_TIMEOUT_MS = 15000
 const STORAGE_KEYS = {
   mode: 'sahaay-mode',
   lang: 'sahaay-lang',
@@ -37,6 +38,7 @@ export function useAI() {
   const [status, setStatus] = useState('idle')
   const [response, setResponse] = useState(null)
   const [error, setError] = useState(null)
+  const [transcript, setTranscript] = useState('')
   const [mode, setMode] = useState(() => getStoredChoice(STORAGE_KEYS.mode, 'scene', VALID_MODES))
   const [lang, setLang] = useState(() => getStoredChoice(STORAGE_KEYS.lang, 'en-IN', VALID_LANGS))
 
@@ -44,6 +46,7 @@ export function useAI() {
   const vision = useVision()
   const timeoutRef = useRef(null)
   const isActiveRef = useRef(false)
+  const abortRef = useRef(null)
 
   const clearSafetyTimeout = useCallback(() => {
     if (timeoutRef.current) {
@@ -52,10 +55,23 @@ export function useAI() {
     }
   }, [])
 
+  const cancel = useCallback(() => {
+    if (!isActiveRef.current) return
+    // Abort any in-flight fetch
+    abortRef.current?.abort()
+    abortRef.current = null
+    clearSafetyTimeout()
+    mic.stopRecording()
+    stopSpeaking()
+    isActiveRef.current = false
+    setStatus('idle')
+  }, [clearSafetyTimeout, mic])
+
   const trigger = useCallback(async () => {
     if (isActiveRef.current) return
 
     isActiveRef.current = true
+    abortRef.current = new AbortController()
     clearSafetyTimeout()
     setError(null)
     setResponse(null)
@@ -68,15 +84,32 @@ export function useAI() {
 
     try {
       setStatus('listening')
-      let transcript = ''
+      let rawTranscript = ''
+      let micFailed = false
 
       try {
-        transcript = await mic.startRecording(lang)
+        rawTranscript = await mic.startRecording(lang)
       } catch (micError) {
+        micFailed = true
         console.warn('Mic failed, continuing without voice:', micError.message)
       }
 
-      const demoResponse = checkDemoScript(transcript)
+      // Expose transcript for UI chat log
+      setTranscript(rawTranscript)
+
+      // Guard: if STT returned empty with no mic exception, warn user explicitly
+      if (!rawTranscript.trim() && !micFailed) {
+        clearSafetyTimeout()
+        const notHeard = 'Could not hear you. Please speak closer to the mic and try again.'
+        setError(notHeard)
+        setStatus('error')
+        await speak(notHeard, lang)
+        setTimeout(() => setStatus('idle'), 2500)
+        isActiveRef.current = false
+        return
+      }
+
+      const demoResponse = checkDemoScript(rawTranscript)
       if (demoResponse) {
         clearSafetyTimeout()
         setStatus('speaking')
@@ -89,14 +122,14 @@ export function useAI() {
 
       setStatus('thinking')
       const contacts = mode === 'face' ? await fetchRegisteredFaces() : []
-      const result = await vision.analyzeFrame(mode, contacts, lang)
+      const result = await vision.analyzeFrame(mode, contacts, lang, rawTranscript)
 
       clearSafetyTimeout()
       setStatus('speaking')
       setResponse(result)
       await speak(result, lang)
 
-      logQuery({ transcript, response: result, mode }).catch(() => {})
+      logQuery({ transcript: rawTranscript, response: result, mode }).catch(() => {})
 
       setStatus('idle')
     } catch (err) {
@@ -135,9 +168,11 @@ export function useAI() {
     status,
     response,
     error,
+    transcript,
     mode,
     lang,
     trigger,
+    cancel,
     switchMode,
     switchLanguage,
     videoRef: vision.videoRef,
@@ -172,10 +207,12 @@ async function logQuery({ transcript, response, mode }) {
 async function fetchRegisteredFaces() {
   try {
     const res = await fetch(apiUrl('/api/faces/1'))
-    if (!res.ok) return []
-    const data = await res.json()
-    return Array.isArray(data) ? data : []
+    if (res.ok) {
+      const data = await res.json()
+      if (Array.isArray(data) && data.length > 0) return data
+    }
   } catch {
-    return []
+    // backend offline — fall through to localStorage
   }
+  return loadLocalFaces()
 }

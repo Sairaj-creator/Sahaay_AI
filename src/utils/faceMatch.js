@@ -1,37 +1,60 @@
 import * as faceapi from 'face-api.js'
 
 let modelsLoaded = false
-let modelsLoading = false
+let loadingPromise = null
 
-export async function loadFaceModels() {
-  if (modelsLoaded) return true
-  if (modelsLoading) return false
+const LOCAL_FACES_KEY = 'sahaay-registered-faces'
 
-  modelsLoading = true
-
+export function loadLocalFaces() {
   try {
-    const MODEL_URL = '/face-models'
-
-    await Promise.all([
-      faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
-      faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-      faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-    ])
-
-    modelsLoaded = true
-    modelsLoading = false
-    return true
-  } catch (err) {
-    console.warn('face-api.js models failed to load:', err.message)
-    modelsLoading = false
-    return false
+    const raw = localStorage.getItem(LOCAL_FACES_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
   }
 }
 
-export async function descriptorFromBase64(base64) {
+export function saveLocalFace(contact_name, embedding, photo_url = '') {
+  const faces = loadLocalFaces()
+  faces.push({ id: Date.now(), contact_name, embedding, photo_url })
+  localStorage.setItem(LOCAL_FACES_KEY, JSON.stringify(faces))
+}
+
+export function deleteLocalFace(id) {
+  const faces = loadLocalFaces().filter((f) => f.id !== id)
+  localStorage.setItem(LOCAL_FACES_KEY, JSON.stringify(faces))
+}
+
+export async function loadFaceModels() {
+  if (modelsLoaded) return true
+  if (loadingPromise) return loadingPromise
+
+  loadingPromise = (async () => {
+    try {
+      const MODEL_URL = '/face-models'
+
+      await Promise.all([
+        faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+      ])
+
+      modelsLoaded = true
+      return true
+    } catch (err) {
+      console.warn('face-api.js models failed to load:', err.message)
+      loadingPromise = null
+      return false
+    }
+  })()
+
+  return loadingPromise
+}
+
+export async function descriptorFromBase64(base64, mimeType = 'image/jpeg') {
   try {
     const img = document.createElement('img')
-    img.src = `data:image/jpeg;base64,${base64}`
+    img.src = `data:${mimeType};base64,${base64}`
 
     await new Promise((resolve, reject) => {
       img.onload = resolve
@@ -83,7 +106,8 @@ function cosineSimilarity(a, b) {
     normB += b[i] * b[i]
   }
 
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB))
+  const denom = Math.sqrt(normA) * Math.sqrt(normB)
+  return denom > 0 ? dot / denom : 0
 }
 
 export async function matchFace(videoElement, registeredFaces) {
@@ -112,7 +136,7 @@ export async function matchFace(videoElement, registeredFaces) {
     }
   }
 
-  if (bestMatch && bestSimilarity >= 0.6) {
+  if (bestMatch && bestSimilarity >= 0.75) {
     return { name: bestMatch.contact_name, score: bestSimilarity }
   }
 

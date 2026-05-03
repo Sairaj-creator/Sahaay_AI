@@ -1,23 +1,17 @@
-import { useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { announceScreen } from '../utils/tts.js'
 
-const cardStyle = {
-  minHeight: 96,
-  width: '100%',
-  borderRadius: 24,
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: 'linear-gradient(145deg, #12304f, #0a1624)',
-  color: '#f8fbff',
-  padding: 24,
-  fontSize: 24,
-  fontWeight: 700,
-  textAlign: 'left',
-  cursor: 'pointer',
-}
+const FEATURES = [
+  { icon: '🌐', label: 'Scene AI',    desc: 'Describes your surroundings in natural language' },
+  { icon: '📄', label: 'Text Reader', desc: 'Reads signs, labels, and documents aloud'         },
+  { icon: '💰', label: 'Currency',    desc: 'Identifies Indian rupee notes instantly'           },
+  { icon: '👤', label: 'Face Recog.', desc: 'Recognises registered friends and family'         },
+]
 
 export default function OnboardingScreen() {
   const navigate = useNavigate()
+  const [hovered, setHovered] = useState(null)
 
   useEffect(() => {
     announceScreen(
@@ -31,73 +25,177 @@ export default function OnboardingScreen() {
   }
 
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        background: 'radial-gradient(circle at top, #15355d 0%, #07111d 55%, #04070d 100%)',
-        color: '#f8fbff',
-        padding: 24,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <section style={{ width: '100%', maxWidth: 720 }}>
-        <p style={{ fontSize: 18, letterSpacing: 1.2, textTransform: 'uppercase', color: '#8cc8ff' }}>
-          Sahaay AI
+    <main style={{
+      minHeight: '100vh',
+      background: `
+        radial-gradient(ellipse 120% 70% at 50% -10%, rgba(56,189,248,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 80% 50% at 80% 80%, rgba(129,140,248,0.08) 0%, transparent 50%),
+        linear-gradient(180deg, #050B14 0%, #000000 100%)
+      `,
+      color: '#f0f6ff',
+      fontFamily: 'var(--font-body)',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      padding: '0 20px 60px',
+      position: 'relative',
+      overflow: 'hidden',
+    }}>
+      <style>{`
+        @keyframes floatOrb {
+          0%, 100% { transform: translateY(0px) scale(1); }
+          50%       { transform: translateY(-18px) scale(1.03); }
+        }
+        @keyframes onboardFadeUp {
+          from { opacity: 0; transform: translateY(24px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+
+      {/* Decorative background blobs */}
+      <div style={{
+        position: 'absolute', top: -120, left: '50%', transform: 'translateX(-50%)',
+        width: 500, height: 500, borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(56,189,248,0.06) 0%, transparent 70%)',
+        pointerEvents: 'none',
+      }} />
+
+      {/* Hero orb */}
+      <div style={{
+        marginTop: 72,
+        width: 120, height: 120,
+        borderRadius: '50%',
+        background: `
+          radial-gradient(circle at 35% 30%, rgba(255,255,255,0.35) 0%, transparent 50%),
+          radial-gradient(circle at 65% 70%, rgba(0,0,0,0.35) 0%, transparent 50%),
+          radial-gradient(circle at 50% 50%, #38bdf8 0%, #1d4ed8 100%)
+        `,
+        boxShadow: '0 0 0 20px rgba(56,189,248,0.08), 0 24px 64px rgba(56,189,248,0.3)',
+        animation: 'floatOrb 4s ease-in-out infinite',
+        marginBottom: 36,
+        flexShrink: 0,
+      }} />
+
+      {/* Brand + headline */}
+      <div style={{ textAlign: 'center', maxWidth: 520, animation: 'onboardFadeUp 0.6s ease-out 0.1s both' }}>
+        <p style={{
+          fontSize: 12, fontWeight: 700, letterSpacing: '0.22em',
+          textTransform: 'uppercase', color: 'rgba(56,189,248,0.65)',
+          marginBottom: 14,
+        }}>
+          Sahaay AI · Voice-First Companion
         </p>
-        <h1 style={{ fontSize: 40, lineHeight: 1.1, margin: '12px 0 18px' }}>
-          The most intelligent interface is sometimes no interface at all.
+        <h1 style={{
+          fontFamily: 'var(--font-display)',
+          fontSize: 'clamp(30px, 6vw, 46px)',
+          fontWeight: 800, lineHeight: 1.1,
+          letterSpacing: '-0.03em',
+          background: 'linear-gradient(135deg, #f0f6ff 0%, rgba(56,189,248,0.8) 100%)',
+          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+          backgroundClip: 'text',
+          marginBottom: 16,
+        }}>
+          The most intelligent interface is no interface at all.
         </h1>
-        <p style={{ fontSize: 20, lineHeight: 1.6, color: '#d4e9ff', marginBottom: 24 }}>
-          Sahaay listens, looks through the camera, and speaks back in clear language for visually
-          impaired users in India.
+        <p style={{ fontSize: 16, lineHeight: 1.7, color: 'rgba(240,246,255,0.5)', marginBottom: 40 }}>
+          Tap once, speak naturally, and let the camera answer back — in English, Hindi, or Kannada.
         </p>
+      </div>
 
-        <div style={{ display: 'grid', gap: 18 }}>
-          <button
-            type="button"
-            onClick={() => handleSelect('user', '/app')}
-            aria-label="Start Sahaay as a visually impaired user"
-            style={cardStyle}
-          >
+      {/* Feature chips */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, 1fr)',
+        gap: 12, width: '100%', maxWidth: 480,
+        marginBottom: 40,
+        animation: 'onboardFadeUp 0.6s ease-out 0.2s both',
+      }}>
+        {FEATURES.map((f) => (
+          <div key={f.label} style={{
+            padding: '14px 16px',
+            borderRadius: 16,
+            border: '1px solid rgba(255,255,255,0.07)',
+            background: 'rgba(255,255,255,0.03)',
+            backdropFilter: 'blur(12px)',
+          }}>
+            <div style={{ fontSize: 24, marginBottom: 6 }}>{f.icon}</div>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{f.label}</div>
+            <div style={{ fontSize: 12, color: 'rgba(240,246,255,0.4)', lineHeight: 1.5 }}>{f.desc}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Primary CTAs */}
+      <div style={{
+        display: 'grid', gap: 14, width: '100%', maxWidth: 480,
+        animation: 'onboardFadeUp 0.6s ease-out 0.3s both',
+      }}>
+        <button
+          type="button"
+          onClick={() => handleSelect('user', '/app')}
+          aria-label="Start Sahaay as a visually impaired user"
+          onMouseEnter={() => setHovered('user')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            padding: '22px 28px',
+            borderRadius: 20,
+            border: hovered === 'user' ? '1.5px solid rgba(56,189,248,0.5)' : '1.5px solid rgba(255,255,255,0.1)',
+            background: hovered === 'user'
+              ? 'linear-gradient(135deg, rgba(56,189,248,0.18) 0%, rgba(29,78,216,0.14) 100%)'
+              : 'rgba(255,255,255,0.05)',
+            backdropFilter: 'blur(16px)',
+            color: '#f0f6ff',
+            fontSize: 20, fontWeight: 700, textAlign: 'left',
+            cursor: 'pointer',
+            transition: 'all 200ms ease',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}
+        >
+          <span>
+            <span style={{ fontSize: 28, marginRight: 14 }}>👁</span>
             I am visually impaired
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSelect('caregiver', '/caregiver')}
-            aria-label="Open caregiver setup and dashboard"
-            style={{ ...cardStyle, background: 'linear-gradient(145deg, #1f3322, #0a1710)' }}
-          >
-            Set up for someone
-          </button>
-        </div>
+          </span>
+          <span style={{ fontSize: 22, color: 'rgba(56,189,248,0.6)' }}>→</span>
+        </button>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 24 }}>
-          <Link
-            to="/demo"
-            aria-label="Open the live demo screen"
-            style={{
-              minWidth: 160,
-              minHeight: 80,
-              borderRadius: 20,
-              border: '1px solid rgba(255,255,255,0.14)',
-              color: '#f8fbff',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 18,
-              textDecoration: 'none',
-              padding: '0 20px',
-            }}
-          >
-            Demo screen
-          </Link>
-          <p style={{ fontSize: 18, color: '#9eb4ca', margin: 0, alignSelf: 'center' }}>
-            Best experience: Chrome or Edge with mic and camera permissions enabled.
-          </p>
-        </div>
-      </section>
+        <button
+          type="button"
+          onClick={() => handleSelect('caregiver', '/caregiver')}
+          aria-label="Open caregiver setup and dashboard"
+          onMouseEnter={() => setHovered('care')}
+          onMouseLeave={() => setHovered(null)}
+          style={{
+            padding: '22px 28px',
+            borderRadius: 20,
+            border: hovered === 'care' ? '1.5px solid rgba(52,211,153,0.5)' : '1.5px solid rgba(255,255,255,0.07)',
+            background: hovered === 'care'
+              ? 'rgba(52,211,153,0.1)'
+              : 'rgba(255,255,255,0.025)',
+            backdropFilter: 'blur(16px)',
+            color: '#f0f6ff',
+            fontSize: 20, fontWeight: 700, textAlign: 'left',
+            cursor: 'pointer',
+            transition: 'all 200ms ease',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}
+        >
+          <span>
+            <span style={{ fontSize: 28, marginRight: 14 }}>🧡</span>
+            Set up for someone
+          </span>
+          <span style={{ fontSize: 22, color: 'rgba(52,211,153,0.5)' }}>→</span>
+        </button>
+      </div>
+
+      {/* Footer note */}
+      <p style={{
+        marginTop: 28, fontSize: 13,
+        color: 'rgba(240,246,255,0.25)',
+        textAlign: 'center', maxWidth: 380, lineHeight: 1.6,
+        animation: 'onboardFadeUp 0.6s ease-out 0.4s both',
+      }}>
+        Best experience on Chrome or Edge with mic and camera permissions enabled.
+      </p>
     </main>
   )
 }

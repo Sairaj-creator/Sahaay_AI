@@ -1,4 +1,24 @@
 let currentUtterance = null
+let keepAliveTimer = null
+
+// Chrome has a known bug where speechSynthesis silently stops after ~15s.
+// This keepalive timer calls pause/resume every 10s to prevent that.
+function startKeepAlive() {
+  stopKeepAlive()
+  keepAliveTimer = setInterval(() => {
+    if (window.speechSynthesis?.speaking) {
+      window.speechSynthesis.pause()
+      window.speechSynthesis.resume()
+    }
+  }, 10000)
+}
+
+function stopKeepAlive() {
+  if (keepAliveTimer) {
+    clearInterval(keepAliveTimer)
+    keepAliveTimer = null
+  }
+}
 
 export function speak(text, lang = 'en-IN') {
   return new Promise((resolve) => {
@@ -15,28 +35,44 @@ export function speak(text, lang = 'en-IN') {
     utterance.pitch = 1.0
     utterance.volume = 1.0
 
-    const voices = window.speechSynthesis.getVoices()
-    const match =
-      voices.find((voice) => voice.lang === lang) ||
-      voices.find((voice) => voice.lang.startsWith(lang.split('-')[0])) ||
-      voices.find((voice) => voice.lang.includes('en'))
+    const setVoiceAndSpeak = () => {
+      const voices = window.speechSynthesis.getVoices()
+      const match =
+        voices.find((voice) => voice.lang === lang) ||
+        voices.find((voice) => voice.lang.startsWith(lang.split('-')[0])) ||
+        voices.find((voice) => voice.lang.includes('en'))
 
-    if (match) {
-      utterance.voice = match
+      if (match) {
+        utterance.voice = match
+      }
+
+      currentUtterance = utterance
+      startKeepAlive()
+      window.speechSynthesis.speak(utterance)
     }
 
-    utterance.onend = resolve
-    utterance.onerror = resolve
+    utterance.onend = () => {
+      stopKeepAlive()
+      resolve()
+    }
+    utterance.onerror = () => {
+      stopKeepAlive()
+      resolve()
+    }
 
-    currentUtterance = utterance
-    window.speechSynthesis.speak(utterance)
+    if (window.speechSynthesis.getVoices().length > 0) {
+      setVoiceAndSpeak()
+    } else {
+      window.speechSynthesis.onvoiceschanged = () => {
+        setVoiceAndSpeak()
+      }
+    }
   })
 }
 
 export function stopSpeaking() {
-  if (currentUtterance) {
-    currentUtterance = null
-  }
+  stopKeepAlive()
+  currentUtterance = null
   window.speechSynthesis?.cancel()
 }
 

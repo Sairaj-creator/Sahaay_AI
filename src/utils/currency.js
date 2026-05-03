@@ -1,6 +1,6 @@
 import * as ort from 'onnxruntime-web'
 
-const MODEL_URL = '/currency.onnx'
+const MODEL_URL = '/currency-model/best.onnx'
 const INPUT_SIZE = 640
 const CONF_THRESHOLD = 0.55
 const IOU_THRESHOLD = 0.45

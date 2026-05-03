@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback } from 'react'
 import { callWhisper } from '../utils/openai.js'
 
+const OPENAI_KEY = import.meta.env.VITE_OPENAI_API_KEY
+
 function getSpeechRecognitionCtor() {
   if (typeof window === 'undefined') return null
   return window.SpeechRecognition || window.webkitSpeechRecognition || null
@@ -60,6 +62,11 @@ export function useMic() {
       const SpeechRecognition = getSpeechRecognitionCtor()
 
       if (!SpeechRecognition) {
+        if (!OPENAI_KEY) {
+          reject(new Error('Speech recognition is not supported. Use Chrome or Edge.'))
+          return
+        }
+
         ;(async () => {
           try {
             setError(null)
