@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAI } from '../hooks/useAI'
-import { announceScreen } from '../utils/tts.js'
+import { useWakeWord } from '../hooks/useWakeWord'
+import { announceScreen, speak } from '../utils/tts.js'
 
 /* ── Status metadata ──────────────────────────────────────── */
 const STATUS_META = {
@@ -187,8 +188,11 @@ function ChatBubble({ role, text }) {
   )
 }
 
+const NAV_NAMES = { '/actions': 'Quick Actions', '/settings': 'Settings', '/caregiver': 'Caregiver', '/demo': 'Demo' }
+
 /* ── Main component ───────────────────────────────────────── */
 export default function OrbScreen() {
+  const navigate = useNavigate()
   const {
     status, response, error, mode, lang,
     trigger, cancel, switchMode,
@@ -207,6 +211,18 @@ export default function OrbScreen() {
   const [chatLog, setChatLog] = useState([])
   const [showHints, setShowHints] = useState(false)
   const [sttError, setSttError] = useState(null)
+  const [wakeEnabled, setWakeEnabled] = useState(() => {
+    try { return localStorage.getItem('sahaay-wake-word') !== 'off' } catch { return true }
+  })
+
+  const toggleWake = useCallback(() => {
+    setWakeEnabled(v => {
+      const next = !v
+      try { localStorage.setItem('sahaay-wake-word', next ? 'on' : 'off') } catch {}
+      speak(next ? 'Voice trigger on' : 'Voice trigger off', lang)
+      return next
+    })
+  }, [lang])
 
   // Push transcript to chat log when AI returns one
   const prevTranscriptRef = useRef('')
@@ -275,6 +291,35 @@ export default function OrbScreen() {
 
   const meta = STATUS_META[status] || STATUS_META.idle
   const isActive = status !== 'idle' && status !== 'error'
+
+  // Voice nav — speak confirmation then navigate
+  const handleNavigate = useCallback((route) => {
+    speak(`Opening ${NAV_NAMES[route] || route}`, lang).then(() => navigate(route))
+  }, [lang, navigate])
+
+  // Wake word / voice commands — single continuous recognition loop
+  const { active: wakeListening, lastHeard } = useWakeWord({
+    onWake: handleTrigger,
+    onMode: switchMode,
+    onNavigate: handleNavigate,
+    lang,
+    enabled: wakeEnabled && status === 'idle',
+  })
+
+  // Space bar — keyboard trigger for hands-free use
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.code === 'Space' && status === 'idle') {
+        const tag = e.target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        
+        e.preventDefault()
+        handleTrigger()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [status, handleTrigger])
 
   // ── Background radial based on status ──
   const bgGradient = `
@@ -377,6 +422,64 @@ export default function OrbScreen() {
         }}>
           {meta.label}
         </div>
+
+        {/* Hands-free hint — visible only when idle */}
+        {status === 'idle' && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, animation: 'fadeSlideUp 0.4s ease-out' }}>
+              <div
+                aria-live="polite"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 14px',
+                  borderRadius: 'var(--r-full)',
+                  background: wakeListening ? 'rgba(56,189,248,0.08)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${wakeListening ? 'rgba(56,189,248,0.25)' : 'rgba(255,255,255,0.08)'}`,
+                  fontSize: 13,
+                  color: wakeListening ? 'rgba(56,189,248,0.8)' : 'rgba(240,246,255,0.35)',
+                  transition: 'all 400ms ease',
+                  flex: 1,
+                }}
+              >
+                <span style={{
+                  width: 7, height: 7, borderRadius: '50%',
+                  background: wakeListening ? '#38bdf8' : 'rgba(255,255,255,0.2)',
+                  flexShrink: 0,
+                  animation: wakeListening ? 'glowPulse 1.8s ease-in-out infinite' : 'none',
+                }} />
+                {wakeListening
+                  ? 'Say "Sahaay" · mode · nav'
+                  : wakeEnabled ? 'Waiting…' : 'Voice trigger off'}
+              </div>
+
+              <button
+                type="button"
+                onClick={toggleWake}
+                aria-label={wakeEnabled ? 'Turn voice trigger off' : 'Turn voice trigger on'}
+                aria-pressed={wakeEnabled}
+                style={{
+                  flexShrink: 0,
+                  padding: '6px 12px',
+                  borderRadius: 'var(--r-full)',
+                  border: `1px solid ${wakeEnabled ? 'rgba(56,189,248,0.35)' : 'rgba(255,255,255,0.12)'}`,
+                  background: wakeEnabled ? 'rgba(56,189,248,0.12)' : 'rgba(255,255,255,0.05)',
+                  color: wakeEnabled ? '#38bdf8' : 'rgba(240,246,255,0.4)',
+                  fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                  transition: 'all 250ms ease',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                {wakeEnabled ? 'ON' : 'OFF'}
+              </button>
+            </div>
+
+            {wakeListening && lastHeard && (
+              <p style={{ fontSize: 11, fontStyle: 'italic', color: 'rgba(240,246,255,0.28)', margin: 0 }}>
+                heard: "{lastHeard}"
+              </p>
+            )}
+          </>
+        )}
 
         {/* Mic waveform */}
         {status === 'listening' && (

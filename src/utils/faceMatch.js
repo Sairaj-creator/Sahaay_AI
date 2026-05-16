@@ -52,8 +52,12 @@ export async function loadFaceModels() {
 }
 
 export async function descriptorFromBase64(base64, mimeType = 'image/jpeg') {
+  let img = null
   try {
-    const img = document.createElement('img')
+    img = document.createElement('img')
+    // Must be in DOM so face-api.js can read pixel dimensions
+    img.style.cssText = 'position:absolute;top:-9999px;left:-9999px;visibility:hidden'
+    document.body.appendChild(img)
     img.src = `data:${mimeType};base64,${base64}`
 
     await new Promise((resolve, reject) => {
@@ -61,33 +65,37 @@ export async function descriptorFromBase64(base64, mimeType = 'image/jpeg') {
       img.onerror = () => reject(new Error('Could not load face image.'))
     })
 
+    const opts = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 })
     const detection = await faceapi
-      .detectSingleFace(img)
+      .detectSingleFace(img, opts)
       .withFaceLandmarks()
       .withFaceDescriptor()
 
-    if (!detection) {
-      return null
-    }
-
+    if (!detection) return null
     return Array.from(detection.descriptor)
   } catch (err) {
     console.warn('Could not extract face descriptor from image:', err.message)
     return null
+  } finally {
+    img?.parentNode?.removeChild(img)
   }
 }
 
 export async function descriptorFromVideo(videoElement) {
   try {
+    // Snapshot to a canvas so face-api.js gets a stable frozen frame
+    const canvas = document.createElement('canvas')
+    canvas.width = videoElement.videoWidth || 640
+    canvas.height = videoElement.videoHeight || 480
+    canvas.getContext('2d').drawImage(videoElement, 0, 0)
+
+    const opts = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 })
     const detection = await faceapi
-      .detectSingleFace(videoElement)
+      .detectSingleFace(canvas, opts)
       .withFaceLandmarks()
       .withFaceDescriptor()
 
-    if (!detection) {
-      return null
-    }
-
+    if (!detection) return null
     return Array.from(detection.descriptor)
   } catch (err) {
     console.warn('Could not extract face descriptor from video:', err.message)
@@ -95,49 +103,38 @@ export async function descriptorFromVideo(videoElement) {
   }
 }
 
-function cosineSimilarity(a, b) {
-  let dot = 0
-  let normA = 0
-  let normB = 0
-
-  for (let i = 0; i < a.length; i += 1) {
-    dot += a[i] * b[i]
-    normA += a[i] * a[i]
-    normB += b[i] * b[i]
+function euclideanDistance(a, b) {
+  let sum = 0
+  for (let i = 0; i < a.length; i++) {
+    const d = a[i] - b[i]
+    sum += d * d
   }
-
-  const denom = Math.sqrt(normA) * Math.sqrt(normB)
-  return denom > 0 ? dot / denom : 0
+  return Math.sqrt(sum)
 }
 
 export async function matchFace(videoElement, registeredFaces) {
   const liveDescriptor = await descriptorFromVideo(videoElement)
-
-  if (!liveDescriptor) {
-    return null
-  }
+  if (!liveDescriptor) return null
 
   const validFaces = registeredFaces.filter(
     (face) => Array.isArray(face.embedding) && face.embedding.length === 128
   )
-
-  if (validFaces.length === 0) {
-    return null
-  }
+  if (validFaces.length === 0) return null
 
   let bestMatch = null
-  let bestSimilarity = -1
+  let bestDistance = Infinity
 
   for (const face of validFaces) {
-    const similarity = cosineSimilarity(liveDescriptor, face.embedding)
-    if (similarity > bestSimilarity) {
-      bestSimilarity = similarity
+    const distance = euclideanDistance(liveDescriptor, face.embedding)
+    if (distance < bestDistance) {
+      bestDistance = distance
       bestMatch = face
     }
   }
 
-  if (bestMatch && bestSimilarity >= 0.75) {
-    return { name: bestMatch.contact_name, score: bestSimilarity }
+  // face-api.js standard threshold: < 0.5 is a confident match, < 0.6 is acceptable
+  if (bestMatch && bestDistance < 0.5) {
+    return { name: bestMatch.contact_name, score: bestDistance }
   }
 
   return null

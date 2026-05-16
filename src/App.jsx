@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
-import OnboardingScreen from './screens/OnboardingScreen.jsx'
+import LandingScreen from './screens/LandingScreen.jsx'
 import OrbScreen from './screens/OrbScreen.jsx'
 import DemoScreen from './screens/DemoScreen.jsx'
 import QuickActionsScreen from './screens/QuickActionsScreen.jsx'
@@ -9,7 +9,7 @@ import SettingsScreen from './screens/SettingsScreen.jsx'
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<OnboardingScreen />} />
+      <Route path="/" element={<LandingScreen />} />
       <Route path="/app" element={<OrbScreen />} />
       <Route path="/demo" element={<DemoScreen />} />
       <Route path="/actions" element={<QuickActionsScreen />} />
