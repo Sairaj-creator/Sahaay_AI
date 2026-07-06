@@ -178,47 +178,23 @@ export async function callGroqVision(base64Image, prompt) {
   }, 1)
 }
 
-// ─── Provider 3 — NVIDIA NIM (Llama 3.2 11B Vision) ─────────────────────────
-// Uses the OpenAI-compatible /v1/chat/completions endpoint.
-// meta/llama-3.2-11b-vision-instruct accepts base64 data URIs on NIM.
+// ─── Provider 3 — NVIDIA NIM via local backend proxy (CORS safe) ──────────────
+// NVIDIA NIM blocks direct browser requests (no CORS headers).
+// We forward through our Express server at /api/nvidia-vision instead.
 export async function callNvidiaVision(base64Image, prompt) {
-  if (!NVIDIA_KEY || NVIDIA_KEY === 'your_key_here') {
-    throw new Error('NVIDIA API key not configured.')
-  }
-
-  const res = await fetch(NVIDIA_CHAT_URL, {
+  const res = await fetch('/api/nvidia-vision', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${NVIDIA_KEY}`,
-    },
-    body: JSON.stringify({
-      model: NVIDIA_VISION_MODEL,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image_url',
-              image_url: { url: `data:image/jpeg;base64,${base64Image}` },
-            },
-            { type: 'text', text: prompt },
-          ],
-        },
-      ],
-      max_tokens: 200,
-      temperature: 0.4,
-      stream: false,
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base64Image, prompt }),
   })
 
   if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`NVIDIA NIM error: ${res.status}${body ? ` — ${body.slice(0, 120)}` : ''}`)
+    const body = await res.json().catch(() => ({}))
+    throw new Error(`NVIDIA NIM proxy error: ${res.status} — ${body.error || ''}`)
   }
 
   const data = await res.json()
-  return data.choices?.[0]?.message?.content || 'No response received.'
+  return data.text || 'No response received.'
 }
 
 // ─── MiniMax via NVIDIA NIM — TEXT ONLY ──────────────────────────────────────

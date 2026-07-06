@@ -153,6 +153,54 @@ app.post('/api/emergency', writeLimiter, (req, res) => {
   return res.json({ id: result.lastInsertRowid, name: name.trim(), phone: phone.trim() })
 })
 
+// ─── NVIDIA NIM Vision proxy (CORS workaround) ──────────────────────────────
+// The browser cannot call integrate.api.nvidia.com directly due to missing
+// CORS headers. This route forwards the request server-side.
+app.post('/api/nvidia-vision', writeLimiter, async (req, res) => {
+  const { base64Image, prompt } = req.body
+  if (!base64Image || !prompt) return badRequest(res, 'base64Image and prompt are required.')
+
+  const NVIDIA_KEY = process.env.VITE_NVIDIA_API_KEY
+  const NVIDIA_MODEL = process.env.VITE_NVIDIA_VISION_MODEL || 'meta/llama-3.2-11b-vision-instruct'
+
+  if (!NVIDIA_KEY) return res.status(503).json({ error: 'NVIDIA API key not configured on server.' })
+
+  try {
+    const upstream = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${NVIDIA_KEY}`,
+      },
+      body: JSON.stringify({
+        model: NVIDIA_MODEL,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } },
+              { type: 'text', text: prompt },
+            ],
+          },
+        ],
+        max_tokens: 200,
+        temperature: 0.4,
+        stream: false,
+      }),
+    })
+
+    const data = await upstream.json()
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: data?.detail || 'NVIDIA NIM error' })
+    }
+
+    const text = data.choices?.[0]?.message?.content || 'No response received.'
+    return res.json({ text })
+  } catch (err) {
+    return res.status(502).json({ error: `Proxy fetch failed: ${err.message}` })
+  }
+})
+
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     return res.status(400).json({ error: 'Invalid JSON body.' })
