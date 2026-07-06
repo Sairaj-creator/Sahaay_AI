@@ -2,6 +2,8 @@ import express from 'express'
 import cors from 'cors'
 import rateLimit from 'express-rate-limit'
 import { db } from './db.js'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
 const app = express()
 
@@ -200,6 +202,12 @@ app.post('/api/nvidia-vision', writeLimiter, async (req, res) => {
     return res.status(502).json({ error: `Proxy fetch failed: ${err.message}` })
   }
 })
+
+if (process.env.NODE_ENV === 'production') {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url))
+  app.use(express.static(path.join(__dirname, '../dist')))
+  app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../dist/index.html')))
+}
 
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {

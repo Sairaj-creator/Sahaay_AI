@@ -5,6 +5,10 @@ afterEach(() => {
   cleanup()
 })
 
+global.HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+  drawImage: vi.fn(), fillRect: vi.fn(), clearRect: vi.fn(),
+}))
+
 // Mock Web Speech API — not available in jsdom
 global.SpeechSynthesisUtterance = vi.fn().mockImplementation(() => ({
   onend: null,
@@ -13,7 +17,9 @@ global.SpeechSynthesisUtterance = vi.fn().mockImplementation(() => ({
 global.speechSynthesis = {
   speak: vi.fn(),
   cancel: vi.fn(),
-  getVoices: vi.fn().mockReturnValue([]),
+  getVoices: vi.fn().mockReturnValue([
+    { lang: 'en-IN', name: 'Test Voice' },
+  ]),
 }
 
 // Mock SpeechRecognition — not available in jsdom

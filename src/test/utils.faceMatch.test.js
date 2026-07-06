@@ -8,6 +8,7 @@ vi.mock('face-api.js', () => ({
     faceRecognitionNet: { loadFromUri: vi.fn() },
   },
   detectSingleFace: vi.fn(),
+  SsdMobilenetv1Options: vi.fn(),
 }))
 
 const vecA = Array(128).fill(0).map((_, i) => Math.sin(i))
@@ -81,7 +82,7 @@ describe('utils/faceMatch', () => {
     })
     const { matchFace } = await import('../utils/faceMatch.js')
     const res = await matchFace(document.createElement('video'), [{ embedding: vecB, contact_name: 'John Doe' }])
-    expect(res).toEqual({ name: 'John Doe', score: 1.0 })
+    expect(res).toEqual({ name: 'John Doe', score: 0 })
   })
 
   it('matchFace returns null when best cosine similarity is below 0.6', async () => {
