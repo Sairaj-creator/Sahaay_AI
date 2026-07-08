@@ -1,6 +1,18 @@
 import Database from 'better-sqlite3'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
-export const db = new Database('sahaay.db')
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// 1. Define the dynamic path using an environment variable with a local fallback
+const dbPath = process.env.DB_PATH || path.join(__dirname, 'sahaay.db')
+
+// 2. Initialize the database with the resolved path
+export const db = new Database(dbPath)
+console.log(`Successfully connected to SQLite database at: ${dbPath}`)
+
+// Enable foreign keys or other pragmas if necessary
+db.pragma('foreign_keys = ON')
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (

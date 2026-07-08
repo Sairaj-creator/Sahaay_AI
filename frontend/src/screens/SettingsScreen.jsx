@@ -93,9 +93,17 @@ export default function SettingsScreen() {
     announceScreen('Settings. Update language, default mode, and offline preferences.', lang)
   }, [lang])
 
-  const geminiReady  = Boolean(import.meta.env.VITE_GEMINI_API_KEY)
-  const groqReady    = Boolean(import.meta.env.VITE_GROQ_API_KEY)
-  const whisperReady = Boolean(import.meta.env.VITE_OPENAI_API_KEY)
+  const [apiConfig, setApiConfig] = useState({ geminiReady: false, groqReady: false, whisperReady: false })
+
+  useEffect(() => {
+    const baseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+    fetch(`${baseUrl}/api/config`)
+      .then(r => r.json())
+      .then(setApiConfig)
+      .catch(() => {})
+  }, [])
+
+  const { geminiReady, groqReady, whisperReady } = apiConfig
 
   const toggleFlag = (key, setter) => {
     setter(prev => {
