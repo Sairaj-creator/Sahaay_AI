@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import request from 'supertest'
 
 process.env.NODE_ENV = 'test'
@@ -188,4 +188,99 @@ describe('Backend API Routes', () => {
       expect(res.status).toBe(400)
     })
   })
+
+  describe('API Proxies', () => {
+    let originalEnv
+
+    beforeAll(() => {
+      originalEnv = { ...process.env }
+      process.env.GEMINI_API_KEY = 'test_gemini_key'
+      process.env.GROQ_API_KEY = 'test_groq_key'
+      process.env.OPENAI_API_KEY = 'test_openai_key'
+      process.env.NVIDIA_API_KEY = 'test_nvidia_key'
+      process.env.HF_API_KEY = 'test_hf_key'
+      process.env.POLLINATIONS_KEY = 'test_poll_key'
+    })
+
+    afterAll(() => {
+      process.env = originalEnv
+    })
+
+    it('GET /api/config returns keys presence status', async () => {
+      const res = await request(app).get('/api/config')
+      expect(res.status).toBe(200)
+      expect(res.body).toEqual({
+        geminiReady: true,
+        groqReady: true,
+        whisperReady: true
+      })
+    })
+
+    it('POST /api/vision fallbacks through providers successfully', async () => {
+      const mockFetch = vi.fn().mockImplementation((url) => {
+        if (url.includes('api.groq.com')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ choices: [{ message: { content: 'Groq vision response' } }] })
+          })
+        }
+        return Promise.resolve({ ok: false })
+      })
+      vi.stubGlobal('fetch', mockFetch)
+
+      const res = await request(app)
+        .post('/api/vision')
+        .send({ base64Image: 'abc', prompt: 'hello' })
+
+      expect(res.status).toBe(200)
+      expect(res.body.text).toBe('Groq vision response')
+      expect(mockFetch).toHaveBeenCalled()
+
+      vi.unstubAllGlobals()
+    })
+
+    it('POST /api/text routes to Nvidia text API', async () => {
+      const mockFetch = vi.fn().mockImplementation(() => {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ choices: [{ message: { content: 'Nvidia text response' } }] })
+        })
+      })
+      vi.stubGlobal('fetch', mockFetch)
+
+      const res = await request(app)
+        .post('/api/text')
+        .send({ prompt: 'hello text' })
+
+      expect(res.status).toBe(200)
+      expect(res.body.text).toBe('Nvidia text response')
+
+      vi.unstubAllGlobals()
+    })
+
+    it('POST /api/whisper handles audio binary cascade', async () => {
+      const mockFetch = vi.fn().mockImplementation((url) => {
+        if (url.includes('api-inference.huggingface.co')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ text: 'HF whisper response' })
+          })
+        }
+        return Promise.resolve({ ok: false })
+      })
+      vi.stubGlobal('fetch', mockFetch)
+
+      const dummyAudio = Buffer.from('mock-audio-data')
+      const res = await request(app)
+        .post('/api/whisper')
+        .set('Content-Type', 'audio/webm')
+        .send(dummyAudio)
+
+      expect(res.status).toBe(200)
+      expect(res.body.text).toBe('HF whisper response')
+
+      vi.unstubAllGlobals()
+    })
+  })
 })
+

@@ -1,9 +1,12 @@
 import express from 'express'
 import cors from 'cors'
 import rateLimit from 'express-rate-limit'
-import { db } from './db.js'
+import dotenv from 'dotenv'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { db } from './db.js'
+
+dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.env') })
 
 const app = express()
 
@@ -155,58 +158,185 @@ app.post('/api/emergency', writeLimiter, (req, res) => {
   return res.json({ id: result.lastInsertRowid, name: name.trim(), phone: phone.trim() })
 })
 
-// ─── NVIDIA NIM Vision proxy (CORS workaround) ──────────────────────────────
-// The browser cannot call integrate.api.nvidia.com directly due to missing
-// CORS headers. This route forwards the request server-side.
-app.post('/api/nvidia-vision', writeLimiter, async (req, res) => {
+// ─── API Proxies to secure keys ───────────────────────────────────────────
+
+app.get('/api/config', (req, res) => {
+  res.json({
+    geminiReady: Boolean(process.env.GEMINI_API_KEY),
+    groqReady: Boolean(process.env.GROQ_API_KEY),
+    whisperReady: Boolean(process.env.OPENAI_API_KEY)
+  })
+})
+
+app.post('/api/vision', writeLimiter, async (req, res) => {
   const { base64Image, prompt } = req.body
   if (!base64Image || !prompt) return badRequest(res, 'base64Image and prompt are required.')
 
-  const NVIDIA_KEY = process.env.VITE_NVIDIA_API_KEY
-  const NVIDIA_MODEL = process.env.VITE_NVIDIA_VISION_MODEL || 'meta/llama-3.2-11b-vision-instruct'
+  const GEMINI_KEY = process.env.GEMINI_API_KEY
+  const GROQ_KEY = process.env.GROQ_API_KEY
+  const NVIDIA_KEY = process.env.NVIDIA_API_KEY
+  const NVIDIA_MODEL = process.env.NVIDIA_VISION_MODEL || 'meta/llama-3.2-11b-vision-instruct'
+  const POLLINATIONS_KEY = process.env.POLLINATIONS_KEY
 
-  if (!NVIDIA_KEY) return res.status(503).json({ error: 'NVIDIA API key not configured on server.' })
+  // 1. Groq
+  if (GROQ_KEY) {
+    try {
+      const g = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_KEY}` },
+        body: JSON.stringify({
+          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }, { type: 'text', text: prompt }] }],
+          max_completion_tokens: 200,
+        }),
+      })
+      if (g.ok) {
+        const data = await g.json()
+        return res.json({ text: data.choices?.[0]?.message?.content || '' })
+      }
+    } catch (err) { console.warn('Groq failed', err.message) }
+  }
 
+  // 2. Gemini
+  if (GEMINI_KEY) {
+    try {
+      const g = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ inline_data: { mime_type: 'image/jpeg', data: base64Image } }, { text: prompt }] }],
+          generationConfig: { maxOutputTokens: 200, temperature: 0.4 },
+        }),
+      })
+      if (g.ok) {
+        const data = await g.json()
+        return res.json({ text: data.candidates?.[0]?.content?.parts?.[0]?.text || '' })
+      }
+    } catch (err) { console.warn('Gemini failed', err.message) }
+  }
+
+  // 3. NVIDIA
+  if (NVIDIA_KEY) {
+    try {
+      const upstream = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${NVIDIA_KEY}` },
+        body: JSON.stringify({
+          model: NVIDIA_MODEL,
+          messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }, { type: 'text', text: prompt }] }],
+          max_tokens: 200, temperature: 0.4, stream: false,
+        }),
+      })
+      if (upstream.ok) {
+        const data = await upstream.json()
+        return res.json({ text: data.choices?.[0]?.message?.content || '' })
+      }
+    } catch (err) { console.warn('NVIDIA failed', err.message) }
+  }
+
+  // 4. Pollinations
   try {
-    const upstream = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+    const headers = { 'Content-Type': 'application/json' }
+    if (POLLINATIONS_KEY) headers.Authorization = `Bearer ${POLLINATIONS_KEY}`
+    const p = await fetch('https://text.pollinations.ai/openai/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${NVIDIA_KEY}`,
-      },
+      headers,
       body: JSON.stringify({
-        model: NVIDIA_MODEL,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } },
-              { type: 'text', text: prompt },
-            ],
-          },
-        ],
+        model: 'openai-large',
+        messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }, { type: 'text', text: prompt }] }],
         max_tokens: 200,
-        temperature: 0.4,
-        stream: false,
       }),
     })
-
-    const data = await upstream.json()
-    if (!upstream.ok) {
-      return res.status(upstream.status).json({ error: data?.detail || 'NVIDIA NIM error' })
+    if (p.ok) {
+      const data = await p.json()
+      return res.json({ text: data.choices?.[0]?.message?.content || '' })
     }
+  } catch (err) { console.warn('Pollinations failed', err.message) }
 
-    const text = data.choices?.[0]?.message?.content || 'No response received.'
-    return res.json({ text })
+  return res.status(502).json({ error: 'All vision APIs failed.' })
+})
+
+app.post('/api/text', writeLimiter, async (req, res) => {
+  const { prompt } = req.body
+  if (!prompt) return badRequest(res, 'prompt is required.')
+
+  const NVIDIA_KEY = process.env.NVIDIA_API_KEY
+  if (!NVIDIA_KEY) return res.status(503).json({ error: 'NVIDIA API key not configured.' })
+
+  const NVIDIA_BASE_URL = process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1'
+  const NVIDIA_TEXT_MODEL = process.env.NVIDIA_TEXT_MODEL || 'minimaxai/minimax-m1'
+
+  try {
+    const upstream = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${NVIDIA_KEY}` },
+      body: JSON.stringify({
+        model: NVIDIA_TEXT_MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 200, temperature: 1, top_p: 0.95, stream: false,
+      }),
+    })
+    const data = await upstream.json()
+    if (!upstream.ok) return res.status(upstream.status).json({ error: data?.detail || 'NVIDIA NIM error' })
+    return res.json({ text: data.choices?.[0]?.message?.content || '' })
   } catch (err) {
-    return res.status(502).json({ error: `Proxy fetch failed: ${err.message}` })
+    return res.status(502).json({ error: `Text API failed: ${err.message}` })
   }
+})
+
+app.post('/api/whisper', writeLimiter, express.raw({ type: '*/*', limit: '10mb' }), async (req, res) => {
+  const audioBlob = req.body
+  if (!audioBlob || !Buffer.isBuffer(audioBlob) || audioBlob.length === 0) return badRequest(res, 'Audio binary body required.')
+
+  const HF_KEY = process.env.HF_API_KEY
+  const OPENAI_KEY = process.env.OPENAI_API_KEY
+  const lang = req.query.lang || 'en'
+  const contentType = req.headers['content-type'] || 'audio/webm'
+
+  // 1. HF Whisper
+  try {
+    const headers = { 'Content-Type': contentType }
+    if (HF_KEY) headers.Authorization = `Bearer ${HF_KEY}`
+    
+    const hf = await fetch('https://api-inference.huggingface.co/models/openai/whisper-large-v3-turbo', {
+      method: 'POST',
+      headers,
+      body: audioBlob,
+    })
+    
+    if (hf.ok) {
+      const data = await hf.json()
+      if (data.text) return res.json({ text: data.text })
+    }
+  } catch (err) { console.warn('HF Whisper failed', err.message) }
+
+  // 2. OpenAI Whisper
+  if (OPENAI_KEY) {
+    try {
+      const formData = new FormData()
+      formData.append('file', new Blob([audioBlob], { type: contentType }), 'recording.webm')
+      formData.append('model', 'whisper-1')
+      formData.append('language', lang.split('-')[0])
+
+      const oai = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${OPENAI_KEY}` },
+        body: formData,
+      })
+      if (oai.ok) {
+        const data = await oai.json()
+        return res.json({ text: data.text || '' })
+      }
+    } catch (err) { console.warn('OpenAI Whisper failed', err.message) }
+  }
+
+  return res.status(502).json({ error: 'All STT APIs failed.' })
 })
 
 if (process.env.NODE_ENV === 'production') {
   const __dirname = path.dirname(fileURLToPath(import.meta.url))
-  app.use(express.static(path.join(__dirname, '../dist')))
-  app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../dist/index.html')))
+  app.use(express.static(path.join(__dirname, '../frontend/dist')))
+  app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../frontend/dist/index.html')))
 }
 
 app.use((err, req, res, next) => {
