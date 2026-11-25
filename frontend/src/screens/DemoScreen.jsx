@@ -21,7 +21,7 @@ export default function DemoScreen() {
     trigger, switchMode, switchLanguage,
     videoRef, startCamera, stopCamera,
     cameraReady,
-  } = useAI()
+  } = useAI({ demoScripts: true })
 
   const [isTriggering, setIsTriggering] = useState(false)
 

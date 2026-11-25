@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { loadFaceModels, descriptorFromBase64, saveLocalFace, loadLocalFaces, deleteLocalFace } from '../utils/faceMatch.js'
+import {
+  loadFaceModels, descriptorFromBase64, saveLocalFace, loadLocalFaces, deleteLocalFace,
+  setLocalFaceServerId, mergeFaces,
+} from '../utils/faceMatch.js'
 import { announceScreen } from '../utils/tts.js'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || ''
@@ -15,6 +18,27 @@ function readFileAsDataUrl(file) {
     reader.onload = () => resolve(reader.result)
     reader.onerror = () => reject(new Error('Could not read the selected file.'))
     reader.readAsDataURL(file)
+  })
+}
+
+// Phone photos are several MB. Stored as-is they overflow localStorage (~5 MB) after
+// one or two contacts and exceed the backend's 2 MB photo limit, so shrink them first.
+// 640px on the longest side is plenty for face detection.
+const FACE_PHOTO_MAX_SIDE = 640
+
+function downscaleDataUrl(dataUrl, maxSide = FACE_PHOTO_MAX_SIDE) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(img.naturalWidth * scale)
+      canvas.height = Math.round(img.naturalHeight * scale)
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+      resolve(canvas.toDataURL('image/jpeg', 0.85))
+    }
+    img.onerror = () => reject(new Error('That file is not an image we can read.'))
+    img.src = dataUrl
   })
 }
 
@@ -112,7 +136,7 @@ export default function CaregiverScreen() {
       fetch(apiUrl('/api/query-log/1')),
     ])
     if (dashRes.ok)     setDashboard(await dashRes.json())
-    if (facesRes.ok)    setFaces(await facesRes.json())
+    if (facesRes.ok)    setFaces(mergeFaces(loadLocalFaces(), await facesRes.json()))
     if (activityRes.ok) {
       const entries = await activityRes.json()
       setRecentActivity(Array.isArray(entries) ? entries.slice(0, 10) : [])
@@ -138,7 +162,7 @@ export default function CaregiverScreen() {
     const file = event.target.files?.[0]
     if (!file) return
     try {
-      const photoUrl = await readFileAsDataUrl(file)
+      const photoUrl = await downscaleDataUrl(await readFileAsDataUrl(file))
       setFaceForm(c => ({ ...c, photo_url: photoUrl, file_name: file.name }))
       notify('Photo ready to register.', 'ok')
     } catch (err) {
@@ -162,18 +186,37 @@ export default function CaregiverScreen() {
         notify('No face detected. Use a clear front-facing photo.', 'error'); return
       }
 
-      // Save to localStorage immediately — works fully offline
-      saveLocalFace(faceForm.contact_name.trim(), descriptor, faceForm.photo_url)
+      const contactName = faceForm.contact_name.trim()
+      const photoUrl = faceForm.photo_url
+
+      // Save on this device first — works fully offline
+      const localFace = saveLocalFace(contactName, descriptor, photoUrl)
       setFaces(loadLocalFaces())
       setFaceForm({ contact_name: '', photo_url: '', file_name: '' })
-      notify('Face registered successfully. ✓', 'ok')
 
-      // Fire-and-forget to backend if available
-      fetch(apiUrl('/api/register-face'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 1, contact_name: faceForm.contact_name.trim(), embedding: descriptor, photo_url: faceForm.photo_url }),
-      }).catch(() => {})
+      // Back up to the server and link the two copies so a later delete removes both
+      let backedUp = false
+      try {
+        const res = await fetch(apiUrl('/api/register-face'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: 1, contact_name: contactName, embedding: descriptor, photo_url: photoUrl }),
+        })
+        if (res.ok) {
+          const saved = await res.json()
+          setLocalFaceServerId(localFace.id, saved.id)
+          backedUp = true
+        }
+      } catch {
+        // backend offline — the face still works from this device
+      }
+
+      notify(
+        backedUp
+          ? `${contactName} registered. ✓`
+          : `${contactName} registered on this device only — the server could not be reached.`,
+        'ok'
+      )
     } catch (err) {
       notify(err.message, 'error')
     }
@@ -201,12 +244,27 @@ export default function CaregiverScreen() {
     }
   }
 
-  const deleteFace = (faceId) => {
-    deleteLocalFace(faceId)
-    setFaces(loadLocalFaces())
+  // Local ids (timestamps) and server ids (row numbers) are different, so delete each
+  // copy by its own id. Otherwise a "deleted" face survives on the server and is
+  // still recognised.
+  const deleteFace = async (face) => {
+    try {
+      deleteLocalFace(face.id)
+    } catch (err) {
+      notify(err.message, 'error'); return
+    }
+    setFaces((current) => current.filter((f) => f.id !== face.id))
+
+    if (face.server_id != null) {
+      try {
+        const res = await fetch(apiUrl(`/api/faces/${face.server_id}`), { method: 'DELETE' })
+        if (!res.ok) throw new Error()
+      } catch {
+        notify('Face removed from this device, but the server copy could not be deleted. Try again when online.', 'error')
+        return
+      }
+    }
     notify('Face deleted.', 'ok')
-    // Fire-and-forget to backend if available
-    fetch(apiUrl(`/api/faces/${faceId}`), { method: 'DELETE' }).catch(() => {})
   }
 
   const truncateQuery = (text) => {
@@ -400,7 +458,7 @@ export default function CaregiverScreen() {
                   <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: '#f0f6ff' }}>{face.contact_name}</p>
                   <button
                     type="button"
-                    onClick={() => deleteFace(face.id)}
+                    onClick={() => deleteFace(face)}
                     aria-label={`Delete ${face.contact_name}`}
                     style={{
                       width: '100%', padding: '8px 12px',
