@@ -1,8 +1,8 @@
 import { useState, useRef, useCallback } from 'react'
 import { compressFrame, callVision } from '../utils/openai.js'
 import { classifyCurrency } from '../utils/currency.js'
-import { loadFaceModels, descriptorFromVideo, matchFace } from '../utils/faceMatch.js'
-import { PROMPTS } from '../utils/prompts.js'
+import { loadFaceModels, descriptorFromVideo, findBestMatch } from '../utils/faceMatch.js'
+import { buildPrompt } from '../utils/prompts.js'
 
 let ocrWorkerPromise = null
 
@@ -132,7 +132,7 @@ export function useVision() {
   }, [])
 
   const analyzeFrame = useCallback(
-    async (mode = 'scene', contacts = [], lang = 'en-IN') => {
+    async (mode = 'scene', contacts = [], lang = 'en-IN', question = '') => {
       if (!videoRef.current || !cameraReady) {
         throw new Error('Camera not ready.')
       }
@@ -167,44 +167,33 @@ export function useVision() {
           }
         }
 
-        if (offlineModeEnabled() && (mode === 'scene' || mode === 'face')) {
-          throw new Error('Offline mode is on. Scene and face descriptions need internet access.')
-        }
-
+        // Face recognition runs entirely on-device. A cloud model has never seen the
+        // registered contacts, so asking it would only produce a guessed name.
         if (mode === 'face') {
-          const faceModelsReady = await loadFaceModels()
-
-          if (faceModelsReady && contacts.length > 0) {
-            const localMatch = await matchFace(videoRef.current, contacts)
-
-            if (localMatch) {
-              return `This appears to be ${localMatch.name}.`
-            }
-
-            const base64 = compressFrame(videoRef.current)
-            const liveDescriptor = await descriptorFromVideo(videoRef.current)
-
-            if (!liveDescriptor) {
-              return 'No face detected in frame. Please point the camera directly at the person.'
-            }
-
-            const contactList = contacts.map((contact) => contact.contact_name).join(', ')
-            const prompt = PROMPTS.face.replace('{CONTACTS_PLACEHOLDER}', contactList)
-            return await callVision(base64, prompt)
+          if (contacts.length === 0) {
+            return 'No contacts are registered yet. Ask your caregiver to add faces in the caregiver screen.'
           }
 
-          const base64 = compressFrame(videoRef.current)
-          const contactList =
-            contacts.length > 0
-              ? contacts.map((contact) => contact.contact_name).join(', ')
-              : 'No registered contacts.'
-          const prompt = PROMPTS.face.replace('{CONTACTS_PLACEHOLDER}', contactList)
-          return await callVision(base64, prompt)
+          const faceModelsReady = await loadFaceModels()
+          if (!faceModelsReady) {
+            throw new Error('Face recognition could not start. Please try again.')
+          }
+
+          const liveDescriptor = await descriptorFromVideo(videoRef.current)
+          if (!liveDescriptor) {
+            return 'No face detected. Please point the camera directly at the person.'
+          }
+
+          const match = findBestMatch(liveDescriptor, contacts)
+          return match ? `This appears to be ${match.name}.` : 'I do not recognise this person.'
+        }
+
+        if (offlineModeEnabled() && mode === 'scene') {
+          throw new Error('Offline mode is on. Scene descriptions need internet access.')
         }
 
         const base64 = compressFrame(videoRef.current)
-
-        const prompt = PROMPTS[mode] || PROMPTS.scene
+        const prompt = buildPrompt(mode, { question, lang })
 
         return await callVision(base64, prompt)
       } catch (err) {

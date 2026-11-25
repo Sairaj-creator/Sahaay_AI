@@ -585,12 +585,12 @@ export default function OrbScreen() {
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}
         >
-          <span>💬 Demo voice phrases</span>
+          <span>💬 Example voice phrases</span>
           <span style={{ transition: 'transform 0.2s', transform: showHints ? 'rotate(180deg)' : 'none' }}>⌄</span>
         </button>
 
         {showHints && (
-          <div role="region" aria-label="Demo phrase hints" style={{
+          <div role="region" aria-label="Example voice phrases" style={{
             marginTop: 8,
             borderRadius: 'var(--r-lg)',
             border: '1px solid rgba(255,255,255,0.07)',

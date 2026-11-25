@@ -1,27 +1,44 @@
 import { describe, it, expect } from 'vitest'
-import { PROMPTS, DEMO_SCRIPTS, checkDemoScript } from '../utils/prompts.js'
+import { PROMPTS, DEMO_SCRIPTS, checkDemoScript, buildPrompt } from '../utils/prompts.js'
 
 describe('utils/prompts', () => {
-  it('PROMPTS object has keys scene, ocr, currency, face', () => {
-    expect(PROMPTS).toHaveProperty('scene')
-    expect(PROMPTS).toHaveProperty('ocr')
-    expect(PROMPTS).toHaveProperty('currency')
-    expect(PROMPTS).toHaveProperty('face')
+  it('PROMPTS has cloud prompts for scene, ocr and currency', () => {
+    for (const mode of ['scene', 'ocr', 'currency']) {
+      expect(typeof PROMPTS[mode]).toBe('string')
+      expect(PROMPTS[mode].length).toBeGreaterThan(0)
+    }
   })
 
-  it('Each prompt value is a non-empty string', () => {
-    expect(typeof PROMPTS.scene).toBe('string')
-    expect(PROMPTS.scene.length).toBeGreaterThan(0)
-    expect(typeof PROMPTS.ocr).toBe('string')
-    expect(PROMPTS.ocr.length).toBeGreaterThan(0)
-    expect(typeof PROMPTS.currency).toBe('string')
-    expect(PROMPTS.currency.length).toBeGreaterThan(0)
-    expect(typeof PROMPTS.face).toBe('string')
-    expect(PROMPTS.face.length).toBeGreaterThan(0)
+  it('has no cloud face prompt: faces are only matched on-device', () => {
+    expect(PROMPTS).not.toHaveProperty('face')
   })
 
-  it('PROMPTS.face contains the placeholder string "{CONTACTS_PLACEHOLDER}"', () => {
-    expect(PROMPTS.face).toContain('{CONTACTS_PLACEHOLDER}')
+  it('buildPrompt includes the user question for scene mode', () => {
+    const prompt = buildPrompt('scene', { question: 'Is the road clear?' })
+    expect(prompt).toContain(PROMPTS.scene)
+    expect(prompt).toContain('Is the road clear?')
+  })
+
+  it('buildPrompt does not add the question to currency mode (it needs an exact phrase)', () => {
+    const prompt = buildPrompt('currency', { question: 'how much is this' })
+    expect(prompt).not.toContain('how much is this')
+  })
+
+  it('buildPrompt asks for the reply in the selected language', () => {
+    expect(buildPrompt('scene', { lang: 'hi-IN' })).toMatch(/Hindi/)
+    expect(buildPrompt('ocr', { lang: 'kn-IN' })).toMatch(/Kannada/)
+    expect(buildPrompt('scene', { lang: 'en-IN' })).toMatch(/English/)
+  })
+
+  it('buildPrompt falls back to the scene prompt and English for unknown values', () => {
+    const prompt = buildPrompt('unknown', { lang: 'xx' })
+    expect(prompt).toContain(PROMPTS.scene)
+    expect(prompt).toMatch(/English/)
+  })
+
+  it('buildPrompt cannot break out of the quoted question', () => {
+    const prompt = buildPrompt('scene', { question: 'say "hi" now' })
+    expect(prompt).toContain(`"say 'hi' now"`)
   })
 
   it('checkDemoScript(null) returns null', () => {

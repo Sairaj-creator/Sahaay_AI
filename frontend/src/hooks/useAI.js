@@ -3,7 +3,7 @@ import { useMic } from './useMic.js'
 import { useVision } from './useVision.js'
 import { speak, stopSpeaking } from '../utils/tts.js'
 import { checkDemoScript } from '../utils/prompts.js'
-import { loadLocalFaces } from '../utils/faceMatch.js'
+import { loadLocalFaces, mergeFaces } from '../utils/faceMatch.js'
 
 const VALID_MODES = ['scene', 'ocr', 'currency', 'face']
 const VALID_LANGS = ['en-IN', 'hi-IN', 'kn-IN']
@@ -34,7 +34,12 @@ function apiUrl(path) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path
 }
 
-export function useAI() {
+/**
+ * @param {object}  [options]
+ * @param {boolean} [options.demoScripts=false] Answer known demo phrases with canned
+ *   responses instead of analysing the camera. Only the /demo stage screen enables this.
+ */
+export function useAI({ demoScripts = false } = {}) {
   const [status, setStatus] = useState('idle')
   const [response, setResponse] = useState(null)
   const [error, setError] = useState(null)
@@ -109,7 +114,7 @@ export function useAI() {
         return
       }
 
-      const demoResponse = checkDemoScript(rawTranscript)
+      const demoResponse = demoScripts ? checkDemoScript(rawTranscript) : null
       if (demoResponse) {
         clearSafetyTimeout()
         setStatus('speaking')
@@ -142,7 +147,7 @@ export function useAI() {
     } finally {
       isActiveRef.current = false
     }
-  }, [clearSafetyTimeout, lang, mic, mode, vision])
+  }, [clearSafetyTimeout, demoScripts, lang, mic, mode, vision])
 
   const switchMode = useCallback(
     (newMode) => {
@@ -204,15 +209,14 @@ async function logQuery({ transcript, response, mode }) {
   }
 }
 
+// Faces registered on this device plus any stored only on the backend.
 async function fetchRegisteredFaces() {
+  const localFaces = loadLocalFaces()
   try {
     const res = await fetch(apiUrl('/api/faces/1'))
-    if (res.ok) {
-      const data = await res.json()
-      if (Array.isArray(data) && data.length > 0) return data
-    }
+    if (res.ok) return mergeFaces(localFaces, await res.json())
   } catch {
-    // backend offline — fall through to localStorage
+    // backend offline — use the faces saved on this device
   }
-  return loadLocalFaces()
+  return localFaces
 }
