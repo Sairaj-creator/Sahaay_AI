@@ -1,7 +1,34 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAI } from '../hooks/useAI'
-import { announceScreen } from '../utils/tts.js'
+import { announceScreen, speak } from '../utils/tts.js'
+import { ON_DEVICE_KEY } from '../utils/privacy.js'
+import { preloadLocalStt, onLocalSttProgress } from '../utils/localStt.js'
+
+// Download the on-device speech model, reporting overall progress as a percentage.
+function useSpeechModelDownload(enabled) {
+  const [status, setStatus] = useState('')
+
+  useEffect(() => {
+    if (!enabled) { setStatus(''); return }
+    let cancelled = false
+    const files = {}
+    const unsubscribe = onLocalSttProgress((p) => {
+      if (p.type !== 'progress' || !p.total || cancelled) return
+      files[p.file] = { loaded: p.status === 'done' ? p.total : p.loaded, total: p.total }
+      const all = Object.values(files)
+      const pct = Math.floor((100 * all.reduce((s, f) => s + f.loaded, 0)) / all.reduce((s, f) => s + f.total, 0))
+      setStatus(`Downloading speech model… ${pct}%`)
+    })
+    setStatus('Preparing speech model…')
+    preloadLocalStt()
+      .then(() => { if (!cancelled) setStatus('Speech model ready on this device ✓') })
+      .catch(() => { if (!cancelled) setStatus('Speech model could not download. Connect to the internet once and try again.') })
+    return () => { cancelled = true; unsubscribe() }
+  }, [enabled])
+
+  return status
+}
 
 const LANG_LABELS = { 'en-IN': '🇮🇳 English', 'hi-IN': '🇮🇳 हिंदी', 'kn-IN': '🇮🇳 ಕನ್ನಡ' }
 const MODE_LABELS  = { scene: '🌐 Scene', ocr: '📄 Read', currency: '💰 Currency', face: '👤 Face' }
@@ -86,7 +113,8 @@ function readStoredFlag(key, fallback = false) {
 
 export default function SettingsScreen() {
   const { lang, mode, switchLanguage, switchMode } = useAI()
-  const [offlineMode, setOfflineMode] = useState(() => readStoredFlag('sahaay-offline-mode'))
+  const [offlineMode, setOfflineMode] = useState(() => readStoredFlag(ON_DEVICE_KEY))
+  const speechModelStatus = useSpeechModelDownload(offlineMode)
   const [haptic, setHaptic] = useState(() => readStoredFlag('sahaay-haptic', true))
 
   useEffect(() => {
@@ -198,15 +226,24 @@ export default function SettingsScreen() {
               background: 'rgba(255,255,255,0.025)',
             }}>
               <div>
-                <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 3 }}>Offline-first</div>
+                <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 3 }}>On-device only</div>
                 <div style={{ fontSize: 13, color: 'rgba(240,246,255,0.4)', maxWidth: 280 }}>
-                  Prefer local OCR and currency before cloud models
+                  Camera, voice and questions never leave this device. Reading, currency and
+                  faces work offline. Scene description and the voice wake word are off.
                 </div>
+                {speechModelStatus && (
+                  <div role="status" aria-live="polite" style={{ fontSize: 13, marginTop: 6, color: 'rgba(52,211,153,0.85)' }}>
+                    {speechModelStatus}
+                  </div>
+                )}
               </div>
               <button
                 type="button"
-                onClick={() => toggleFlag('sahaay-offline-mode', setOfflineMode)}
-                aria-label={`Offline preference is ${offlineMode ? 'on' : 'off'}`}
+                onClick={() => {
+                  toggleFlag(ON_DEVICE_KEY, setOfflineMode)
+                  speak(offlineMode ? 'On-device only mode is off.' : 'On-device only mode is on.', lang)
+                }}
+                aria-label={`On-device only mode is ${offlineMode ? 'on' : 'off'}`}
                 aria-pressed={offlineMode}
                 style={{
                   width: 50, height: 28, borderRadius: 14, border: 'none',

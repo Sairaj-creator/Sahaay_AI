@@ -3,13 +3,9 @@ import { compressFrame, callVision } from '../utils/openai.js'
 import { classifyCurrency } from '../utils/currency.js'
 import { loadFaceModels, descriptorFromVideo, findBestMatch } from '../utils/faceMatch.js'
 import { buildPrompt } from '../utils/prompts.js'
+import { isOnDeviceOnly } from '../utils/privacy.js'
 
 let ocrWorkerPromise = null
-
-function offlineModeEnabled() {
-  if (typeof window === 'undefined') return false
-  return window.localStorage.getItem('sahaay-offline-mode') === 'true'
-}
 
 function getSnapshotCanvas(videoElement) {
   const width = videoElement.videoWidth || 1280
@@ -147,9 +143,9 @@ export function useVision() {
             return localText
           }
 
-          if (offlineModeEnabled()) {
+          if (isOnDeviceOnly()) {
             throw new Error(
-              'Offline mode is on, but local OCR could not read this text clearly. Try better light or reconnect to the internet.'
+              'On-device mode is on, but local text reading could not read this clearly. Try better light, or turn off on-device mode in Settings.'
             )
           }
         }
@@ -160,9 +156,9 @@ export function useVision() {
             return localResult
           }
 
-          if (offlineModeEnabled()) {
+          if (isOnDeviceOnly()) {
             throw new Error(
-              'Offline mode is on, but the local currency model could not identify this note. Try holding it flatter or reconnect to the internet.'
+              'On-device mode is on, but the local currency model could not identify this note. Try holding it flatter under good light.'
             )
           }
         }
@@ -188,8 +184,8 @@ export function useVision() {
           return match ? `This appears to be ${match.name}.` : 'I do not recognise this person.'
         }
 
-        if (offlineModeEnabled() && mode === 'scene') {
-          throw new Error('Offline mode is on. Scene descriptions need internet access.')
+        if (isOnDeviceOnly() && mode === 'scene') {
+          throw new Error('Scene description is not available in on-device mode yet. Turn off on-device mode in Settings to use it.')
         }
 
         const base64 = compressFrame(videoRef.current)

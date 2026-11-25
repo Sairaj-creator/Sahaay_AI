@@ -7,6 +7,11 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['onnxruntime-web'],
   },
+  // The Whisper worker (src/workers/whisper.worker.js) imports Transformers.js, which
+  // code-splits; that needs ES-module workers.
+  worker: {
+    format: 'es',
+  },
   server: {
     port: 5174,
     headers: {

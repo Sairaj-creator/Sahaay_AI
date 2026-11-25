@@ -1,11 +1,16 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { callWhisper } from '../utils/openai.js'
-
-
+import { isOnDeviceOnly } from '../utils/privacy.js'
+import { preloadLocalStt, transcribeLocally } from '../utils/localStt.js'
 
 function getSpeechRecognitionCtor() {
   if (typeof window === 'undefined') return null
   return window.SpeechRecognition || window.webkitSpeechRecognition || null
+}
+
+function canRecordAudio() {
+  return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia &&
+    typeof MediaRecorder !== 'undefined'
 }
 
 async function captureAudioBlob(durationMs = 3500) {
@@ -55,15 +60,23 @@ export function useMic() {
   const recognitionRef = useRef(null)
   const resolveRef = useRef(null)
 
-  const supported = !!getSpeechRecognitionCtor()
+  // Chrome's and Edge's SpeechRecognition send audio to Google/Microsoft servers,
+  // so on-device mode records the audio and transcribes it with local Whisper instead.
+  const supported = isOnDeviceOnly() ? canRecordAudio() : !!getSpeechRecognitionCtor()
+
+  // Download the on-device model in the background, so the first question isn't slow.
+  useEffect(() => {
+    if (isOnDeviceOnly()) preloadLocalStt().catch(() => {})
+  }, [])
 
   const startRecording = useCallback((lang = 'en-IN') => {
     return new Promise((resolve, reject) => {
+      const onDevice = isOnDeviceOnly()
       const SpeechRecognition = getSpeechRecognitionCtor()
 
-      if (!SpeechRecognition) {
-        // SpeechRecognition not supported, fallback directly to STT API.
-
+      if (onDevice || !SpeechRecognition) {
+        // Record a short clip, then transcribe it: on this device, or via the backend
+        // Whisper proxy when the browser has no SpeechRecognition.
         ;(async () => {
           try {
             setError(null)
@@ -75,7 +88,9 @@ export function useMic() {
             setIsRecording(false)
             setIsTranscribing(true)
 
-            const text = (await callWhisper(audioBlob, lang)).trim()
+            const text = (
+              onDevice ? await transcribeLocally(audioBlob, lang) : await callWhisper(audioBlob, lang)
+            ).trim()
             setTranscript(text)
             setIsTranscribing(false)
             resolve(text)

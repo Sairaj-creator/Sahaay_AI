@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.2",
     "@teachablemachine/image": "^0.8.5",
     "@tensorflow/tfjs": "^4.20.0",
     "face-api.js": "^0.22.2",

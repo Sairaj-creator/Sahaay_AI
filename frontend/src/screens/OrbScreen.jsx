@@ -298,7 +298,7 @@ export default function OrbScreen() {
   }, [lang, navigate])
 
   // Wake word / voice commands — single continuous recognition loop
-  const { active: wakeListening, lastHeard } = useWakeWord({
+  const { active: wakeListening, lastHeard, unavailable: wakeUnavailable } = useWakeWord({
     onWake: handleTrigger,
     onMode: switchMode,
     onNavigate: handleNavigate,
@@ -447,9 +447,11 @@ export default function OrbScreen() {
                   flexShrink: 0,
                   animation: wakeListening ? 'glowPulse 1.8s ease-in-out infinite' : 'none',
                 }} />
-                {wakeListening
-                  ? 'Say "Sahaay" · mode · nav'
-                  : wakeEnabled ? 'Waiting…' : 'Voice trigger off'}
+                {wakeUnavailable
+                  ? 'Voice trigger off (on-device mode) · tap the orb or press Space'
+                  : wakeListening
+                    ? 'Say "Sahaay" · mode · nav'
+                    : wakeEnabled ? 'Waiting…' : 'Voice trigger off'}
               </div>
 
               <button

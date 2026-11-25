@@ -9,7 +9,7 @@ export default function LandingScreen() {
     try { return localStorage.getItem('sahaay-wake-word') !== 'off' } catch { return true }
   })
 
-  const { active: wakeListening, lastHeard } = useWakeWord({
+  const { active: wakeListening, lastHeard, unavailable: wakeUnavailable } = useWakeWord({
     onWake: () => navigate('/app'),
     lang: 'en-IN',
     enabled: wakeEnabled,
@@ -169,7 +169,9 @@ export default function LandingScreen() {
                   background: wakeListening ? '#38bdf8' : 'rgba(255,255,255,0.2)',
                   animation: wakeListening ? 'glowPulse 1.8s ease-in-out infinite' : 'none',
                 }} />
-                {wakeListening ? 'Say "Sahaay" to launch' : wakeEnabled ? 'Starting mic…' : 'Voice trigger off'}
+                {wakeUnavailable
+                  ? 'Voice trigger is off in on-device mode'
+                  : wakeListening ? 'Say "Sahaay" to launch' : wakeEnabled ? 'Starting mic…' : 'Voice trigger off'}
               </div>
 
               <button

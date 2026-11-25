@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
+import { isOnDeviceOnly } from '../utils/privacy.js'
 
 // ── Command tables ─────────────────────────────────────────────
 const WAKE_WORDS = [
@@ -47,7 +48,12 @@ function getSpeechRecognitionCtor() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null
 }
 
-export function useWakeWord({ onWake, onMode, onNavigate, lang = 'en-IN', enabled = true }) {
+export function useWakeWord({ onWake, onMode, onNavigate, lang = 'en-IN', enabled: requested = true }) {
+  // The wake word listens continuously through the browser's SpeechRecognition,
+  // which streams audio to Google/Microsoft. Never run it in on-device-only mode.
+  const unavailable = isOnDeviceOnly()
+  const enabled = requested && !unavailable
+
   const [active, setActive]       = useState(false)
   const [lastHeard, setLastHeard] = useState('')
 
@@ -166,5 +172,5 @@ export function useWakeWord({ onWake, onMode, onNavigate, lang = 'en-IN', enable
     return stop
   }, [enabled, start, stop])
 
-  return { active, lastHeard }
+  return { active, lastHeard, unavailable }
 }
